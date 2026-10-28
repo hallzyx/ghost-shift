@@ -7,7 +7,7 @@ import os
 
 import httpx
 
-from .sam_adapter import SamResult, parse_deltas
+from .sam_adapter import ModelCallError, SamResult, parse_deltas
 
 BASE_URL = "https://api.meta.ai/v1"
 
@@ -35,19 +35,24 @@ def segment(video: bytes, prompt: str, prompt_id: str, *, confidence: bool = Tru
     headers = {"Authorization": f"Bearer {api_key()}", "Accept": "text/event-stream"}
     deltas: list[str] = []
     frames = None
-    with httpx.stream("POST", f"{BASE_URL}/responses", json=body, headers=headers, timeout=timeout) as r:
-        if r.status_code != 200:
-            r.read()
-            raise RuntimeError(f"SAM HTTP {r.status_code}: {r.text[:300]}")
-        request_id = r.headers.get("x-request-id")
-        event = None
-        for line in r.iter_lines():
-            if line.startswith("event:"):
-                event = line[6:].strip()
-            elif line.startswith("data:") and line[5:].strip() != "[DONE]":
-                data = json.loads(line[5:])
-                if event == "response.output_text.delta":
-                    deltas.append(data["delta"])
-                elif event == "response.completed":
-                    frames = (data.get("response", {}).get("usage") or {}).get("video_frames_processed")
+    request_id = None
+    try:
+        with httpx.stream("POST", f"{BASE_URL}/responses", json=body, headers=headers, timeout=timeout) as r:
+            if r.status_code != 200:
+                r.read()
+                raise ModelCallError(f"SAM 3.1 respondió HTTP {r.status_code}.",
+                                     retryable=r.status_code in (429, 500, 502, 503, 504))
+            request_id = r.headers.get("x-request-id")
+            event = None
+            for line in r.iter_lines():
+                if line.startswith("event:"):
+                    event = line[6:].strip()
+                elif line.startswith("data:") and line[5:].strip() != "[DONE]":
+                    data = json.loads(line[5:])
+                    if event == "response.output_text.delta":
+                        deltas.append(data["delta"])
+                    elif event == "response.completed":
+                        frames = (data.get("response", {}).get("usage") or {}).get("video_frames_processed")
+    except httpx.HTTPError as e:
+        raise ModelCallError("No se pudo contactar con SAM 3.1.", retryable=True) from e
     return SamResult(prompt_id, parse_deltas(deltas), frames, request_id)

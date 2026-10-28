@@ -16,7 +16,8 @@ RuleType = Literal["present_in_zone", "in_zone_at", "before"]
 
 class ObjectDef(BaseModel):
     id: str
-    description: str = ""
+    description: str = ""  # nombre para el usuario (español)
+    sam_prompt: str = ""  # frase corta en inglés con que SAM busca el objeto
     confirmed_by_user: bool = True
     ref_max_score: float | None = None  # score de SAM en la referencia (habilita FAIL por ausencia)
     indistinguishable_from: list[str] = Field(default_factory=list)

@@ -27,6 +27,14 @@ class SamParseError(ValueError):
     pass
 
 
+class ModelCallError(RuntimeError):
+    """Fallo de una llamada a modelo; `retryable` indica si tiene sentido reintentar."""
+
+    def __init__(self, message: str, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
+
+
 @dataclass(frozen=True)
 class SamDetection:
     frame: int
