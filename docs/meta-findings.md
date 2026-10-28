@@ -29,7 +29,8 @@ Cuerpo: `input=[{type:message, role:user, content:[{input_text: "<concepto>"},{i
 1. Una petición SAM por objeto + una `aux:hand`, en paralelo (5 llamadas para 4 objetos). Las 3 del e2e tardaron ~4 s cada una.
 2. **No usar `c` para decidir oclusión**; sí ausencia, caída de área y solape con la mano. Ajustar la spec §3.1 si el score constante se confirma en video real.
 3. Cero deltas = resultado válido (ausencia), no error (tests con `hand_conf`).
-4. `frame_t_ms` se calcula con el fps real (ffprobe) y `n_frames` real; SAM procesa todos los fotogramas del archivo. Re-muestrear a ~10 fps en cliente antes de enviar sigue siendo ⏳ **no probado** (el clip de prueba ya estaba a 10 fps).
+4. `frame_t_ms` se calcula con el fps real (ffprobe) y `n_frames` real; SAM procesa todos los fotogramas del archivo. ✅ **Re-muestreo probado**: un video 1280×720 a 30 fps se normaliza en el backend a 960×540 a 10 fps; SAM y el motor dan los mismos instantes (A 1,8 s, B 4,8 s) que con el original a 10 fps.
+5. ❌ **SAM no entiende prompts en español** ("cuadrado azul", "bloque azul", "mano" → 0 resultados). Cada objeto guarda un nombre en español para el usuario y un `sam_prompt` corto en inglés (lo propone Muse y el usuario puede editarlo).
 
 ## Muse Spark 1.3 (modo Standard) — `text.format` json_schema, strict
 Se probó con el mismo video, subido por Files API (`POST /v1/files`, `purpose=user_data`, 200, `file-…`) y por `input_video` (data URL). Ambas rutas funcionan. Esquema: objetos / zonas (bbox normalizada) / eventos (`enter|place|remove|occlusion`, `t_seconds`).
@@ -52,5 +53,17 @@ Se probó con el mismo video, subido por Files API (`POST /v1/files`, `purpose=u
 ## Pendiente / no verificado
 - Manos reales (`aux:hand`), oclusión real, varias instancias del mismo concepto, cambio de ids tras salir/entrar de plano.
 - Límite máximo de tamaño de data URL / `file_id` con SAM; clips de 30–60 s; límites de tasa (📄 ver `pricing-rate-limits`).
-- Re-muestreo a 10 fps desde video a 30 fps; video móvil/VFR.
+- Video móvil/VFR.
 - Muse sobre grabaciones reales (la fiabilidad medida es solo la de un video sintético plano).
+
+## Flujo completo de la app con llamadas reales (28 oct 2026)
+Backend en marcha + video de referencia de ejemplo → Muse propone 2 objetos (en español, con `sam_prompt` en inglés) → SAM (3 peticiones en paralelo) → reglas propuestas (zonas desde la posición final de cada objeto; instantes 1,8 s y 4,8 s = verdad de terreno) → aprobación → 4 ejecuciones de ejemplo, todas con el veredicto esperado:
+
+| Ejemplo | Veredicto | Motivo |
+|---|---|---|
+| `run_ok` | PASS | zonas y orden correctos |
+| `run_wrong_order` | FAIL | `ORDER_VIOLATED` (B 1,8 s, A 4,8 s) |
+| `run_missing_b` | FAIL | `OBJECT_NOT_FOUND` (B nunca aparece mientras A sí) |
+| `run_hand_at_end` | REVIEW | `NOT_VISIBLE_AT_END` (mano tapa A hasta el final) |
+
+Son 5 casos **sintéticos** (el mismo generador, bloques planos): demuestran que el flujo funciona, no que generalice a video real. Latencias medidas: análisis de referencia ≈18 s (Muse ≈11,6 s + SAM ≈4 s), verificación ≈6–7 s. La verificación de ausencia solo se declara para objetos **nunca** detectados en el clip; un objeto que desaparece tras verse da REVIEW, no FAIL (un SAM de una sola llamada no distingue retirada de oclusión).
