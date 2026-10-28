@@ -1,0 +1,19 @@
+[project]
+name = "ghostshift-engine"
+version = "0.1.0"
+description = "Motor determinista de eventos y veredictos de GhostShift (sin red, sin LLM)"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2", "numpy>=1.26"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ghostshift_engine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

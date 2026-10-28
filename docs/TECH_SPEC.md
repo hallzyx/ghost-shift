@@ -6,7 +6,7 @@ Deriva de `docs/PRD.md` (v1.0). El diseño detallado del motor verificador está
 
 | Decisión | Elección | Motivo |
 |---|---|---|
-| Backend | Python 3.12 + FastAPI | Motor de reglas y geometría en Python puro (numpy/opencv); iteración rápida |
+| Backend | Python 3.11+ + FastAPI | Motor de reglas y geometría en Python puro (numpy/opencv); iteración rápida |
 | Frontend | React + Vite + TypeScript | Una sola SPA de 5 pantallas; sin SSR |
 | Persistencia | SQLite + carpeta `data/` por sesión | Sin infraestructura; cumple aislamiento por sesión y borrado explícito |
 | Trabajos largos | Cola en proceso (asyncio) + estado en SQLite | Suficiente para demo; sin Redis |
