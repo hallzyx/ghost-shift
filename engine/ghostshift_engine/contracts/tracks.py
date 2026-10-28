@@ -37,7 +37,7 @@ class AbsenceProbe(BaseModel):
 
 
 class ModelRef(BaseModel):
-    model_id: str = "sam-3-1"
+    model_id: str = "sam-3.1"
     version: str = ""
     request_ids: list[str] = Field(default_factory=list)
 

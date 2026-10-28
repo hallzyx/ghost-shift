@@ -209,7 +209,7 @@ Estas cifras son criterios de *go/no-go* para hackathon, **no** métricas sufici
 
 **Muse Spark (preferencia: `muse-spark-1.3`):** comprender el video de referencia, proponer objetos y pasos, producir reglas estructuradas candidatas y ayudar a resolver correspondencias semánticas. Sus propuestas requieren validación por observación y aprobación humana. Puede funcionar como coordinador de llamadas y acciones con herramientas, sin afirmar autonomía irrestricta.
 
-**SAM 3.1 (`sam-3-1`):** localizar, segmentar y seguir objetos dentro de un clip. Las máscaras y trayectorias alimentan el detector de eventos del verificador.
+**SAM 3.1 (`sam-3.1`):** localizar, segmentar y seguir objetos dentro de un clip. Las máscaras y trayectorias alimentan el detector de eventos del verificador.
 
 **Motor determinista propio:** convertir geometría y tiempo a eventos; ejecutar reglas de presencia/posición/orden; calcular PASS/FAIL/REVIEW con evidencias y registrar incertidumbre. No delegar el veredicto final exclusivamente a una respuesta libre del LLM.
 

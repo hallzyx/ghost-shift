@@ -54,7 +54,7 @@ class AbsenceProbe(BaseModel):   # resultado de re-sondeo explícito (ver §4.4)
 class TrackSet(BaseModel):
     schema_version: Literal["ghostshift.tracks/1"]
     clip: ClipMeta
-    model: ModelRef              # id ("sam-3-1"), versión devuelta, request_ids
+    model: ModelRef              # id ("sam-3.1"), versión devuelta, request_ids
     tracklets: list[Tracklet]
     absence_probes: list[AbsenceProbe] = []
     background_keyframes: list[str]  # rutas a 3 fotogramas (inicio/medio/fin) para calibración
