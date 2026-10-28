@@ -1,0 +1,160 @@
+/* GhostShift — tokens de diseño.
+   Inspirados en la sensación de las interfaces de Meta (azul primario, superficies
+   blancas, botones pill). Sin activos de marca de Meta. */
+
+:root {
+  color-scheme: light;
+
+  /* Marca / acción */
+  --c-primary: #0866ff;
+  --c-primary-hover: #0a5ae0;
+  --c-primary-pressed: #0753cc;
+  --c-primary-tint: #e7f0ff;
+  --c-primary-text: #0753cc; /* texto azul sobre tinte/superficie (AA) */
+  --c-on-primary: #ffffff;
+
+  /* Texto */
+  --c-text: #1c1e21;
+  --c-text-2: #65676b;
+  --c-text-3: #8a8d91;
+
+  /* Fondos y superficies */
+  --c-bg: #f0f2f5;
+  --c-surface: #ffffff;
+  --c-surface-2: #f7f8fa;
+  --c-elevated: #ffffff;
+  --c-secondary-btn: #e4e6eb;
+  --c-secondary-btn-hover: #d8dadf;
+  --c-border: #ced0d4;
+  --c-divider: #e4e6eb;
+  --c-overlay: rgba(28, 30, 33, 0.5);
+
+  /* Estado */
+  --c-success: #31a24c;
+  --c-success-text: #1e7a35;
+  --c-success-tint: #e6f4ea;
+  --c-error: #e41e3f;
+  --c-error-text: #c4162f;
+  --c-error-tint: #fdecee;
+  --c-warning: #f7b928;
+  --c-warning-text: #6b4e00;
+  --c-warning-tint: #fff5d6;
+  --c-on-warning: #1c1e21;
+  --c-violet: #8b3dff;
+  --c-violet-text: #6a24d9;
+  --c-violet-tint: #f2eaff;
+
+  /* Degradado de marca (anillo IA) — usar con moderación */
+  --g-brand: linear-gradient(120deg, #0866ff 0%, #8b3dff 45%, #00c2e0 100%);
+  --g-brand-conic: conic-gradient(from 0deg, #0866ff, #8b3dff, #00c2e0, #0866ff);
+
+  /* Tipografía */
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 32px;
+  --lh: 1.45;
+
+  /* Forma */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 999px;
+
+  /* Sombras muy suaves */
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.02);
+  --sh-2: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --sh-3: 0 12px 28px rgba(0, 0, 0, 0.16), 0 2px 4px rgba(0, 0, 0, 0.08);
+
+  /* Espaciado (múltiplos de 4) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  --focus: 0 0 0 2px var(--c-surface), 0 0 0 4px var(--c-primary);
+  --dur: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --topbar-h: 60px;
+  --maxw: 1200px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --c-primary: #2d7ff9;
+    --c-primary-hover: #4a90ff;
+    --c-primary-pressed: #1f6fe8;
+    --c-primary-tint: #1d2c45;
+    --c-primary-text: #6ea8ff;
+    --c-text: #e4e6eb;
+    --c-text-2: #b0b3b8;
+    --c-text-3: #8a8d91;
+    --c-bg: #18191a;
+    --c-surface: #242526;
+    --c-surface-2: #2c2d2e;
+    --c-elevated: #3a3b3c;
+    --c-secondary-btn: #3a3b3c;
+    --c-secondary-btn-hover: #4e4f50;
+    --c-border: #4e4f50;
+    --c-divider: #3a3b3c;
+    --c-overlay: rgba(0, 0, 0, 0.6);
+    --c-success: #45bd62;
+    --c-success-text: #6fd389;
+    --c-success-tint: #1e3325;
+    --c-error: #f02849;
+    --c-error-text: #ff6b81;
+    --c-error-tint: #3d1d23;
+    --c-warning-text: #f7c95a;
+    --c-warning-tint: #3a3020;
+    --c-violet-text: #b98aff;
+    --c-violet-tint: #2e2440;
+    --sh-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --sh-2: 0 2px 12px rgba(0, 0, 0, 0.4);
+    --sh-3: 0 12px 28px rgba(0, 0, 0, 0.5);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --c-primary: #2d7ff9;
+  --c-primary-hover: #4a90ff;
+  --c-primary-pressed: #1f6fe8;
+  --c-primary-tint: #1d2c45;
+  --c-primary-text: #6ea8ff;
+  --c-text: #e4e6eb;
+  --c-text-2: #b0b3b8;
+  --c-text-3: #8a8d91;
+  --c-bg: #18191a;
+  --c-surface: #242526;
+  --c-surface-2: #2c2d2e;
+  --c-elevated: #3a3b3c;
+  --c-secondary-btn: #3a3b3c;
+  --c-secondary-btn-hover: #4e4f50;
+  --c-border: #4e4f50;
+  --c-divider: #3a3b3c;
+  --c-overlay: rgba(0, 0, 0, 0.6);
+  --c-success: #45bd62;
+  --c-success-text: #6fd389;
+  --c-success-tint: #1e3325;
+  --c-error: #f02849;
+  --c-error-text: #ff6b81;
+  --c-error-tint: #3d1d23;
+  --c-warning-text: #f7c95a;
+  --c-warning-tint: #3a3020;
+  --c-violet-text: #b98aff;
+  --c-violet-tint: #2e2440;
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-2: 0 2px 12px rgba(0, 0, 0, 0.4);
+  --sh-3: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
