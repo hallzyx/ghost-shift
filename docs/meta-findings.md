@@ -1,39 +1,56 @@
 # Hallazgos de la API de Meta (T0)
 
-Fuente: documentación oficial en `dev.meta.ai/docs` leída el 28 oct 2026. **Nada de esto está verificado con llamadas reales todavía**: el host `api.meta.ai` estaba bloqueado por la política de red del entorno al escribir esto. Las filas marcadas ✅ salen de la documentación; ⏳ requieren una prueba real.
+Verificado con llamadas reales el **28 oct 2026** sobre un video **sintético** (2 bloques, 640×360, 10 fps, 8 s; generador y verdad de terreno en `backend/tests/fixtures/sam/`). Leyenda: ✅ comprobado con llamada real · ❌ falla / no se cumple · 📄 solo documentación · ⏳ sin probar. **Límite de la evidencia:** un único clip sintético con bloques planos; no hay manos reales, iluminación variable ni cámara móvil.
 
 ## Acceso
-- Base URL `https://api.meta.ai/v1`, autenticación `Authorization: Bearer $MODEL_API_KEY` (variable de entorno oficial). ✅
-- Ambos modelos usan `POST /v1/responses` (formato compatible con OpenAI Responses). ✅
-- Nombres de modelo correctos: **`sam-3.1`** (no `sam-3-1`) y **`muse-spark-1.3`**. ✅
-- **No usar** `muse-spark-1.3-contributor`: ese modo permite a Meta entrenar con el contenido enviado, incompatible con el consentimiento del PRD §12. Usar siempre modo Standard. ✅
+- `GET /v1/models` con `Authorization: Bearer <clave>` → 200. Modelos listados: `sam-3.1`, `muse-spark-1.3`, `muse-spark-1.3-contributor`, `muse-spark-1.2(-contributor)`, `muse-spark-1.1`, `muse-wonder-1.0`, `muse-image-1.0`, `muse-voice-transcribe-1.0`. ✅
+- Variable de entorno: el entorno expone `META_API_KEY`; la doc oficial usa `MODEL_API_KEY`. El cliente acepta ambas. ✅
+- **No usar** `muse-spark-1.3-contributor` (Meta puede entrenar con el contenido; incompatible con PRD §12). No se llamó. ✅
 
-## SAM 3.1 (resuelve los supuestos S1–S9 de `engine/VERIFIER_ENGINE_SPEC.md`)
-| # | Estado | Hallazgo |
+## SAM 3.1 (`POST /v1/responses`, streaming)
+Cuerpo: `input=[{type:message, role:user, content:[{input_text: "<concepto>"},{input_video: video_url}]}]`, `stream:true`, `metadata:{include_confidence:"true"}` (cadena). El texto llega en eventos `response.output_text.delta`, uno por fotograma; termina en `response.completed` (con `usage.video_frames_processed`) y un `[DONE]`.
+
+| # | Estado | Evidencia real |
 |---|---|---|
-| S1 | ✅ | Prompt por concepto: un sustantivo corto por petición ("blue square"). No admite listas ni comandos; para varios objetos hay que hacer **una petición por concepto** (o prompts de caja/punto con ids propios). Admite atributos (color) para filtrar. |
-| S2 | ✅ | Devuelve caja + máscara por objeto y fotograma, con **id estable por respuesta** mientras el objeto esté en plano; no fiable tras salir/entrar o con oclusión total ⇒ el adaptador debe tratar un id nuevo como posible tracklet distinto (spec §1.2). |
-| S3 | ✅ | La confianza solo llega con `include_confidence: "true"` (campo `c`, 0–1, por registro). Sin esa opción no hay score. |
-| S4 | ✅ | Salida en texto con tokens especiales: `<Nf>id<\|box;x1..y2;w;h\|><\|mask;x=0;y=0;data=H,W,ENCpayload\|>`. Cajas en píxeles de origen; máscara base85 (`~` sin pérdida, `!` 1 bit) a resolución propia menor que el fotograma. Existe parser oficial `@meta-sam/parser` (TS); en Python hay que escribir el parser. |
-| S5 | ✅ | El índice `<Nf>` es del fotograma fuente, base 0, puede saltar y **un fotograma sin objetos no emite línea**. Hay que derivar `frame_t_ms` del fps real del archivo (ffprobe). No existe rango "procesado": el adaptador lo define como todo el clip. |
-| S6 | ⏳ | Entrada de video: MP4/MOV (H.264, H.265, MPEG-4) por `input_video` con URL pública, data URL base64 o `file_id` (Files API). Límites de tamaño/duración y latencia sin medir. |
-| S7 | ⏳ | Comportamiento ante oclusión por manos sin medir (ausencia vs máscara espuria). |
-| S8 | ⏳ | Reproducibilidad entre llamadas idénticas sin medir. Mantener caché por sha256. |
-| S9 | ✅ | Un concepto devuelve **todas** las instancias; ids por instancia. |
-| — | ✅ | Precio: $0,20 por 1.000 fotogramas de video (mínimo 50 por petición). Un clip de 30 s a 10 fps ≈ 300 fotogramas ≈ $0,06 por objeto. Límites de tasa por equipo (ver `pricing-rate-limits`). |
+| S1 | ✅ | "blue square" → solo A (56 fotogramas, 1 id); "yellow square" → solo B (38). El color filtra bien. Una petición por concepto. |
+| S2 | ✅ (limitado) | Un único id (0) por petición durante todo el clip, incluso tras la oclusión (A reaparece con el mismo id). Con un clip simple no se pudo forzar un cambio de id; el adaptador sigue tratando cada id como tracklet aparte. |
+| S3 | ✅ / ❌ | Con `include_confidence` llega `c` en caja y máscara. **Pero `c` fue constante por objeto** (A=0.9024 en los 56 fotogramas, B=0.9064), no por fotograma como dice la doc. **No cae bajo oclusión**, así que el motor no puede apoyarse en el score para detectar oclusión: debe usar ausencia/área/solape con `aux:hand` (spec §3.4). Sin la opción no hay `c`; el adaptador usa 0.9 por defecto. |
+| S4 | ✅ | Formato exactamente el documentado. Caja en píxeles fuente con `w,h`. Máscara = **recorte de la caja** a resolución propia (`x=0;y=0` son desplazamientos dentro del recorte), relleno ≈1.0 en cuadrados. Alfabeto base85 propio (ASCII 33–123 sin `" , ; < > \ |`) y `~` es un codec de rango con contexto, no trivial: se usa el parser oficial `meta-sam-parser` 0.0.6 (SAM License) como dependencia opcional para máscaras. |
+| S5 | ✅ | Índices `<Nf>` base 0 y coinciden con los fotogramas del archivo (A empieza en 11 = primer fotograma con 27 px visibles según la verdad de terreno). Fotogramas sin objeto no emiten línea. `video_frames_processed`=80 = fotogramas reales del archivo. |
+| S6 | ✅ (parcial) | Data URL base64 acepta 7,7 KB (80 fotogramas) y 37 KB (**1280×720, 240 fotogramas, 24 s**: 12,9 s total). Latencia para el clip de 8 s: TTFB 0,9–2,0 s, **total 3,9–5,1 s**. Límite doc 📄: MP4/MOV (H.264/H.265/MPEG-4), hasta 15 000 fotogramas, 16 objetos por fotograma. Sin probar clips largos/pesados ni el límite de tamaño de la data URL ni `file_id` con SAM. |
+| S7 | ✅ (con matices) | Con el bloque A **totalmente tapado** (fotogramas 60–70) SAM devolvió **ausencia** (sin línea), no máscaras alucinadas. Con oclusión parcial (58–59, 71–72) devuelve la caja del trozo visible. Defectos: 2 fotogramas con objeto visible sin detección (57, 73) → el motor debe tolerar huecos cortos. **"hand" devolvió 0 resultados** sobre mi "mano" (rectángulo color piel); **`aux:hand` queda ⏳ hasta probar con manos reales.** |
+| S8 | ✅ (aprox.) | Dos llamadas idénticas: **cajas idénticas** en 56/56 fotogramas, pero **las máscaras difieren en bytes** en todas las líneas. Con vs. sin `include_confidence`: 1 de 56 cajas difiere 1 px. Reproducible a nivel de caja, no bit a bit ⇒ mantener caché por sha256 del video + prompt y no exigir igualdad bit a bit. No se devuelve versión de modelo más fina que `model: sam-3.1`. |
+| S9 | ✅ | Todas las instancias del concepto por petición (aquí 1 por clip; no se probó con varias). |
+| Precisión | ✅ | IoU medio con la verdad de terreno: A 0,969 (mín 0,918), B 0,967 (mín 0,959); 0 falsos positivos. |
+| Coste | ✅ | `usage.video_frames_processed` = 80 por petición (mín. facturable 50); 📄 $0,20 / 1000 fotogramas. |
+| `one_bit` | ✅ | `metadata.mask_encoding:"one_bit"` funciona y reduce el texto de 37 KB a 8 KB (mismas cajas). Recomendado si se guardan máscaras. |
 
-### Consecuencias para el diseño
-1. **Una petición SAM por objeto** (más una para `aux:hand`): con 4 objetos, 5 llamadas por clip. Paralelizar.
-2. **Re-muestreo a ~10 fps en cliente** (ffmpeg) antes de enviar: abarata y fija `analysis_fps`. ⏳ confirmar que SAM acepta el video re-codificado y que los índices coinciden.
-3. **Sondeo de ausencia (spec §4.4):** una petición cuyo resultado vacío es válido ("cero coincidencias" = stream sin deltas), por lo que el `AbsenceProbe` se puede implementar con una llamada extra sobre los últimos fotogramas; el score exige `include_confidence`.
-4. El adaptador debe **tratar 0 deltas como resultado válido**, no como error.
+### Consecuencias de diseño
+1. Una petición SAM por objeto + una `aux:hand`, en paralelo (5 llamadas para 4 objetos). Las 3 del e2e tardaron ~4 s cada una.
+2. **No usar `c` para decidir oclusión**; sí ausencia, caída de área y solape con la mano. Ajustar la spec §3.1 si el score constante se confirma en video real.
+3. Cero deltas = resultado válido (ausencia), no error (tests con `hand_conf`).
+4. `frame_t_ms` se calcula con el fps real (ffprobe) y `n_frames` real; SAM procesa todos los fotogramas del archivo. Re-muestrear a ~10 fps en cliente antes de enviar sigue siendo ⏳ **no probado** (el clip de prueba ya estaba a 10 fps).
 
-## Muse Spark 1.3
-- Entrada de video por `input_file` (`file_id` tras subir con Files API, `purpose: "user_data"`) o `input_video` (URL/base64). Lee también audio. ✅
-- Salida estructurada documentada en `/docs/structured-output` (no revisada aún). ⏳ validar JSON estricto con el esquema de objetos/zonas/eventos.
-- Ventana de contexto 1.048.576 tokens; $1,25/M entrada, $4,25/M salida (Standard). ✅
+## Muse Spark 1.3 (modo Standard) — `text.format` json_schema, strict
+Se probó con el mismo video, subido por Files API (`POST /v1/files`, `purpose=user_data`, 200, `file-…`) y por `input_video` (data URL). Ambas rutas funcionan. Esquema: objetos / zonas (bbox normalizada) / eventos (`enter|place|remove|occlusion`, `t_seconds`).
 
-## Pendiente (requiere acceso a `api.meta.ai`)
-- Smoke test real: `sam-3.1` sobre un video sintético de dos bloques y comparar contra la verdad de terreno.
-- Medir latencia, límites de tamaño, comportamiento en oclusión y reproducibilidad (S6–S8).
-- Probar salida estructurada de Muse Spark con video.
+| Aspecto | Estado | Resultado |
+|---|---|---|
+| JSON válido según esquema | ✅ | 2/2 respuestas válidas (con `strict:true`). |
+| Objetos | ✅ / ❌ | Run 1 (file): A azul, B amarillo y un **objeto "C" inventado** (la mano, "peach square"). Run 2 (video): solo A y B. |
+| Zonas | ✅ | Z1≈[0,24–0,33 × 0,41–0,59] y Z2≈[0,75–0,84 × 0,43–0,58] en run 2 (real: A 0,25–0,34 × 0,42–0,58; B 0,75–0,84 × 0,42–0,58). Run 1 más holgada pero correcta. |
+| Instantes `enter/place` | ✅ (±0,5 s) | enter A 1,0 s (real 1,0); place A 2,1 (real ≈1,8); enter B 4,2 (real 4,0); place B 5,2 (real ≈4,8). Idéntico en ambas ejecuciones. |
+| Oclusión | ❌ | Dijo 5,2 s y 6,3/7,3 s; real 5,7–7,3 s (mano). Evidencia textual inconsistente ("muted purple"). |
+| Reproducibilidad | ❌ | Dos ejecuciones dieron resultados distintos (objeto C, número de eventos). |
+| Latencia / coste | ✅ | 15–28 s por clip de 8 s; ~2,2 k tokens de entrada y 3–5 k de salida (casi todo razonamiento). |
+
+**Conclusión:** útil para *proponer* objetos, zonas y orden aproximado (Fase de referencia, T3/T7), con la estructura garantizada por el esquema; **no es fiable para decidir tiempos exactos ni oclusión ni como fuente de veredicto**. Las propuestas deben ir como `proposed|hypothesis` y ser validadas por el usuario/SAM, como ya prevé el diseño. Lo medido sirve solo para este clip sintético.
+
+## Verificación extremo a extremo (llamadas reales)
+`backend/app/meta/sam_client.py` → 3 peticiones reales (`obj:A`, `obj:B`, `aux:hand`) → `sam_adapter.build_trackset` → `verify_run`: **PASS** (R1 IN_ZONE, R2 IN_ZONE, R3 ORDER_OK). El mismo resultado se reproduce offline en `backend/tests/test_sam_adapter.py` con respuestas crudas grabadas, y con las zonas intercambiadas el motor da **FAIL**.
+
+## Pendiente / no verificado
+- Manos reales (`aux:hand`), oclusión real, varias instancias del mismo concepto, cambio de ids tras salir/entrar de plano.
+- Límite máximo de tamaño de data URL / `file_id` con SAM; clips de 30–60 s; límites de tasa (📄 ver `pricing-rate-limits`).
+- Re-muestreo a 10 fps desde video a 30 fps; video móvil/VFR.
+- Muse sobre grabaciones reales (la fiabilidad medida es solo la de un video sintético plano).
