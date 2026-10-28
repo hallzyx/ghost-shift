@@ -1,0 +1,1 @@
+{"model": "sam-3.1", "recorded": "2026-10-28", "prompt": "hand", "metadata": {"include_confidence": "true"}, "request_ttfb_s": 1.94, "request_total_s": 4.21, "video_frames_processed": 80, "deltas": []}
