@@ -21,6 +21,9 @@ class FrameObs(BaseModel):
     score: float
     bbox: tuple[float, float, float, float]  # x0, y0, x1, y1 normalizados
     mask_rle: dict | None = None
+    # contacto con el borde del fotograma ORIGINAL; lo fija el adaptador cuando la caja se ha transformado
+    # a coordenadas de la referencia (cámara compensada). None = calcularlo sobre ``bbox``.
+    edge: bool | None = None
 
 
 class Tracklet(BaseModel):

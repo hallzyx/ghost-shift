@@ -9,6 +9,7 @@ import json
 
 import httpx
 
+from . import cache
 from .sam_adapter import ModelCallError
 from .sam_client import BASE_URL, api_key
 
@@ -43,8 +44,12 @@ PROMPT = (
 
 
 def propose(video: bytes, timeout: float = 300.0) -> tuple[dict, dict]:
-    """Devuelve (propuesta, info_llamada{request_id, model, status})."""
-    body = {"model": MODEL, "input": [{"type": "message", "role": "user", "content": [
+    """Devuelve (propuesta, info_llamada{request_id, model, status}). Usa la caché si el video ya se analizó."""
+    ck = cache.key("muse", video, model=MODEL, prompt=PROMPT, schema=SCHEMA)
+    hit = cache.get(ck)
+    if hit is not None:
+        return hit["proposal"], {**hit["info"], "status": "cached"}
+    body ={"model": MODEL, "input": [{"type": "message", "role": "user", "content": [
         {"type": "input_text", "text": PROMPT},
         {"type": "input_video", "video_url": "data:video/mp4;base64," + base64.b64encode(video).decode()}]}],
         "text": {"format": {"type": "json_schema", "name": "reference_analysis", "schema": SCHEMA, "strict": True}}}
@@ -61,4 +66,6 @@ def propose(video: bytes, timeout: float = 300.0) -> tuple[dict, dict]:
         data = json.loads(text)
     except json.JSONDecodeError as e:
         raise ModelCallError("Muse Spark devolvió una respuesta no válida.", retryable=True) from e
-    return data, {"request_id": r.headers.get("x-request-id"), "model": j.get("model", MODEL), "status": "ok"}
+    info = {"request_id": r.headers.get("x-request-id"), "model": j.get("model", MODEL), "status": "ok"}
+    cache.put(ck, {"proposal": data, "info": info})
+    return data, info

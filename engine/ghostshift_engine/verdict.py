@@ -17,13 +17,27 @@ _VERDICT = {Tri.TRUE: Verdict.PASS, Tri.FALSE: Verdict.FAIL, Tri.UNKNOWN: Verdic
 
 @dataclass(frozen=True)
 class CalibrationResult:
-    status: str = "ALIGNED"  # ALIGNED | RECALIBRATED | INCOMPATIBLE
+    """Observación del encuadre que entrega el adaptador (backend/app/camera.py); el motor decide con ella.
+
+    ALIGNED: cámara fija y alineada con la referencia. RECALIBRATED: se movió y las cajas ya vienen
+    transformadas a coordenadas de la referencia. UNCHECKED: fondo sin textura, no se pudo medir (se
+    decide como antes, y se informa). INCOMPATIBLE: no se puede confiar en ninguna posición (``issue``
+    p. ej. CAMERA_UNSTABLE) -> REVIEW global. ``camera_moved``: no se pudo alinear con la referencia ->
+    las reglas que dependen de zonas pasan a REVIEW; las relativas (orden, apilado) se evalúan.
+    """
+    status: str = "ALIGNED"  # ALIGNED | RECALIBRATED | UNCHECKED | INCOMPATIBLE
     camera_moved: bool = False
+    issue: str | None = None
+
+
+ZONE_RULES = ("present_in_zone", "in_zone_at")
 
 
 def rule_objects(rule: Rule) -> set[str]:
     if rule.type == "before":
         return {parse_event_ref(rule.first)[0], parse_event_ref(rule.second)[0]}
+    if rule.type == "stacked_on":
+        return {rule.object, rule.base}
     return {rule.object}
 
 
@@ -43,7 +57,7 @@ def verify_run(
     blocking: list[str] = []
     global_reason: str | None = None
     if cal.status == "INCOMPATIBLE":
-        global_reason = "CAMERA_INCOMPATIBLE"
+        global_reason = cal.issue or "CAMERA_INCOMPATIBLE"
     elif not any(
         sum(1 for _ in tl.visible()) * 1000 / tracks.clip.analysis_fps >= params.presence_min_ms
         for tl in timelines.values()
@@ -59,7 +73,7 @@ def verify_run(
             continue
         if global_reason:
             out = Outcome(Tri.UNKNOWN, global_reason)
-        elif cal.camera_moved and rule.type != "before":
+        elif cal.camera_moved and rule.type in ZONE_RULES:
             out = Outcome(Tri.UNKNOWN, "CAMERA_MOVED")
         elif rule_objects(rule) & unconfirmed_objects:
             out = Outcome(Tri.UNKNOWN, "IDENTITY_UNCONFIRMED")

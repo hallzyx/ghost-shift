@@ -32,6 +32,8 @@ const ISSUE_ES: Record<string, string> = {
   INSUFFICIENT_OBSERVATION: 'Observación insuficiente: algún objeto no se vio con claridad durante el tiempo necesario.',
   NO_OBSERVATION: 'No se detectaron los objetos en el video.',
   CAMERA_MOVED: 'La cámara se movió durante la grabación.',
+  CAMERA_UNSTABLE: 'La cámara se movió demasiado: no se pudo alinear con la mesa en muchos fotogramas.',
+  CAMERA_INCOMPATIBLE: 'El encuadre no se pudo alinear con el del video de referencia.',
   CAMERA_MISALIGNED: 'El encuadre es distinto al del video de referencia.',
   OCCLUSION: 'Algo (p. ej. una mano) tapó un objeto en un momento clave.',
   IDENTITY_AMBIGUOUS: 'Dos objetos se parecen demasiado para distinguirlos con seguridad.',
@@ -39,6 +41,9 @@ const ISSUE_ES: Record<string, string> = {
 
 const CAMERA_ES: Record<string, string> = {
   ALIGNED: 'Encuadre compatible con la referencia',
+  RECALIBRATED: 'Cámara movida y compensada (las zonas siguen a la mesa)',
+  UNCHECKED: 'No se pudo comprobar el encuadre (fondo sin textura)',
+  INCOMPATIBLE: 'Cámara demasiado movida o no alineable: no se decide',
   MISALIGNED: 'Encuadre distinto a la referencia',
   MOVED: 'La cámara se movió',
   UNKNOWN: 'No se pudo comprobar el encuadre',
@@ -258,6 +263,23 @@ function ResultView({ run, proc }: { run: Run; proc: Procedure | null }) {
         </div>
       </section>
 
+      {report.camera?.warning && (
+        <Callout
+          tone={report.camera_status === 'INCOMPATIBLE' || !report.camera.aligned_to_reference ? 'warning' : 'info'}
+          title={report.camera_status === 'INCOMPATIBLE' ? 'Cámara demasiado movida' : 'Aviso de cámara'}
+          icon={<Camera size={20} />}
+        >
+          <p>{report.camera.message_es}</p>
+          {(report.camera.max_shift != null || report.camera.registered_ratio != null) && (
+            <p className="muted small">
+              {report.camera.max_shift != null && <>Desplazamiento máximo del encuadre: {Math.round(report.camera.max_shift * 100)} % de la diagonal. </>}
+              {report.camera.registered_ratio != null && <>Fotogramas alineados con la mesa: {Math.round(report.camera.registered_ratio * 100)} %. </>}
+              {report.camera.reference_shift != null && <>Desfase respecto a la referencia: {Math.round(report.camera.reference_shift * 100)} %.</>}
+            </p>
+          )}
+        </Callout>
+      )}
+
       {report.verdict === 'REVIEW' && (
         <Callout tone="warning" title="REVIEW no es un fallo" icon={<Eye size={20} />}>
           <p>
@@ -375,7 +397,7 @@ function ResultView({ run, proc }: { run: Run; proc: Procedure | null }) {
               <dl className="facts">
                 <div>
                   <dt>Encuadre</dt>
-                  <dd>{CAMERA_ES[report.camera_status] ?? report.camera_status}</dd>
+                  <dd>{report.camera?.message_es ?? CAMERA_ES[report.camera_status] ?? report.camera_status}</dd>
                 </div>
                 <div>
                   <dt>Eventos observados</dt>

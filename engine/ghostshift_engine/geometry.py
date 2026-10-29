@@ -78,6 +78,12 @@ def bbox_intersection(a, b) -> float:
     return max(0.0, w) * max(0.0, h)
 
 
+def bbox_iou(a, b) -> float:
+    i = bbox_intersection(a, b)
+    u = bbox_area(a) + bbox_area(b) - i
+    return i / u if u > 0 else 0.0
+
+
 def bbox_center(b) -> tuple[float, float]:
     return ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
 

@@ -2,7 +2,8 @@
 name = "ghostshift-backend"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9", "httpx>=0.27", "ghostshift-engine"]
+dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9", "httpx>=0.27", "ghostshift-engine",
+                "opencv-python-headless>=4.9", "numpy>=1.26"]  # opencv: registro de cámara (app/camera.py)
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

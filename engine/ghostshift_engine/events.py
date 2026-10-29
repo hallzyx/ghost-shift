@@ -9,7 +9,7 @@ from .contracts.procedure import CompiledProcedure
 from .contracts.results import Event
 from .contracts.tracks import TrackSet
 from .features import VISIBLE, ObjectTimeline
-from .geometry import dist_frac_diag, touches_border
+from .geometry import dist_frac_diag
 
 
 @dataclass
@@ -70,7 +70,7 @@ def detect_events(
     last_in_f = vis[0]
     move_t_lo = t[vis[0]]
     gap_in_move = False
-    entered_from_edge = touches_border(tl.bbox[vis[0]], params.border_margin)
+    entered_from_edge = tl.at_edge(vis[0], params.border_margin)
 
     for idx, f in enumerate(vis):
         prev = vis[idx - 1] if idx else None

@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { ArrowDownUp, ChevronDown, ListOrdered, MapPin, Pencil, Trash2, TriangleAlert } from 'lucide-react';
+import { ArrowDownUp, ChevronDown, Layers, ListOrdered, MapPin, Pencil, Trash2, TriangleAlert } from 'lucide-react';
 import type { DraftObject, Rule, Zone } from '../api/types';
 import { objName, refObject, ruleText } from '../lib/rules';
 import { textOn } from '../lib/format';
@@ -10,6 +10,7 @@ const TYPE_META = {
   before: { label: 'Orden', Icon: ListOrdered },
   present_in_zone: { label: 'Posición', Icon: MapPin },
   in_zone_at: { label: 'Posición', Icon: MapPin },
+  stacked_on: { label: 'Apilado', Icon: Layers },
 } as const;
 
 interface Props {
@@ -52,7 +53,7 @@ export function RuleCard({ rule, objects, zones, objectColors, issue, onChange, 
       onMouseLeave={() => onFocusZone?.(null)}
     >
       <div className="rule__main">
-        <span className={`rule__type rule__type--${rule.type === 'before' ? 'order' : 'zone'}`} aria-hidden>
+        <span className={`rule__type rule__type--${rule.type === 'before' || rule.type === 'stacked_on' ? 'order' : 'zone'}`} aria-hidden>
           <meta.Icon size={18} />
         </span>
         <div className="rule__body">
@@ -69,6 +70,13 @@ export function RuleCard({ rule, objects, zones, objectColors, issue, onChange, 
               <span className="obj-chip" style={{ background: objectColors[first], color: textOn(objectColors[first] ?? '') }}>{first}</span>
               <span className="muted">antes que</span>
               <span className="obj-chip" style={{ background: objectColors[second], color: textOn(objectColors[second] ?? '') }}>{second}</span>
+            </p>
+          )}
+          {rule.type === 'stacked_on' && rule.object && rule.base && (
+            <p className="rule__chips" aria-hidden>
+              <span className="obj-chip" style={{ background: objectColors[rule.object], color: textOn(objectColors[rule.object] ?? '') }}>{rule.object}</span>
+              <span className="muted">encima de</span>
+              <span className="obj-chip" style={{ background: objectColors[rule.base], color: textOn(objectColors[rule.base] ?? '') }}>{rule.base}</span>
             </p>
           )}
           {hyp && (
@@ -135,6 +143,33 @@ export function RuleCard({ rule, objects, zones, objectColors, issue, onChange, 
               </label>
               <p className="mini-hint">
                 «{objName(objects, first)}» se debe colocar antes que «{objName(objects, second)}».
+              </p>
+            </div>
+          ) : rule.type === 'stacked_on' ? (
+            <div className="order-editor">
+              <label className="mini-field">
+                <span>Arriba</span>
+                <select className="select" value={rule.object ?? ''} onChange={(e) => edit({ object: e.target.value })}>
+                  {objOptions}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="icon-btn icon-btn--filled order-editor__swap"
+                aria-label="Intercambiar arriba y base"
+                title="Intercambiar arriba y base"
+                onClick={() => edit({ object: rule.base, base: rule.object })}
+              >
+                <ArrowDownUp size={18} />
+              </button>
+              <label className="mini-field">
+                <span>Base (debajo)</span>
+                <select className="select" value={rule.base ?? ''} onChange={(e) => edit({ base: e.target.value })}>
+                  {objOptions}
+                </select>
+              </label>
+              <p className="mini-hint">
+                Al terminar, «{objName(objects, rule.object)}» debe estar directamente encima de «{objName(objects, rule.base)}».
               </p>
             </div>
           ) : (

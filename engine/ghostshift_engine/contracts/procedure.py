@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..geometry import polygon_area, polygon_is_simple, rasterize_polygon
 
-RuleType = Literal["present_in_zone", "in_zone_at", "before"]
+RuleType = Literal["present_in_zone", "in_zone_at", "before", "stacked_on"]
 
 
 class ObjectDef(BaseModel):
@@ -45,6 +45,7 @@ class Rule(BaseModel):
     to: str | None = None
     first: str | None = None
     second: str | None = None
+    base: str | None = None  # stacked_on: «object» debe quedar directamente encima de «base» al terminar
     occurrence: Literal["both_agree", "first", "definitive"] = "both_agree"
 
 
@@ -123,8 +124,17 @@ def compile_procedure(proc: Procedure) -> CompiledProcedure:
     if not active:
         raise ProcedureError("No hay ninguna regla habilitada.")
     order_edges: list[tuple[str, str]] = []
+    stack_edges: list[tuple[str, str]] = []
     for r in active:
-        if r.type in ("present_in_zone", "in_zone_at"):
+        if r.type == "stacked_on":
+            if r.object not in objs or r.base not in objs:
+                raise ProcedureError(f"Regla {r.id}: 'stacked_on' requiere un objeto y una base existentes.")
+            if r.object == r.base:
+                raise ProcedureError(f"Regla {r.id}: un objeto no puede estar apilado sobre sí mismo.")
+            if any(a == r.object for a, _ in stack_edges):
+                raise ProcedureError(f"Regla {r.id}: «{r.object}» ya tiene otra base; solo puede apoyarse sobre una.")
+            stack_edges.append((r.object, r.base))
+        elif r.type in ("present_in_zone", "in_zone_at"):
             if r.object not in objs:
                 raise ProcedureError(f"Regla {r.id}: objeto inexistente {r.object!r}.")
             if r.type == "in_zone_at" and r.at is None:
@@ -145,6 +155,8 @@ def compile_procedure(proc: Procedure) -> CompiledProcedure:
             order_edges.append((r.first, r.second))
     if _has_cycle(order_edges):
         raise ProcedureError("Las reglas de orden forman un ciclo; no existe un orden posible.")
+    if _has_cycle(stack_edges):
+        raise ProcedureError("Las reglas de apilado forman un ciclo; no existe una torre posible.")
     grids = {zid: rasterize_polygon(z.polygon) for zid, z in zones.items()}
     targets = tuple(z.id for z in proc.zones if z.role == "target")
     return CompiledProcedure(proc, proc.content_hash(), workspaces[0], grids, targets)

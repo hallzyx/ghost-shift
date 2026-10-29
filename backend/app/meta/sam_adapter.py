@@ -52,6 +52,7 @@ class SamResult:
     detections: list[SamDetection]
     frames_processed: int | None = None
     request_id: str | None = None
+    cached: bool = False  # respuesta grabada (no se volvió a llamar a la API)
 
 
 def _fields(text: str) -> dict[str, str]:

@@ -12,7 +12,9 @@ from pathlib import Path
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
-from ghostshift_engine import Procedure, ProcedureError, TrackSet, compile_procedure, verify_run
+from ghostshift_engine import EngineParams, Procedure, ProcedureError, TrackSet, compile_procedure, verify_run
+from ghostshift_engine.contracts.tracks import FrameObs
+from ghostshift_engine.features import resolve_identities
 from pydantic import ValidationError
 
 from . import jobs, samples, video
@@ -332,7 +334,7 @@ def create_app(db_path: str = ":memory:", data_dir: str | None = None, start_job
     def get_run(rid: str):
         row = run_or_404(rid)
         meta = _meta(row)
-        report = jobs.report_view(rid, json.loads(row["report_json"])) if row["report_json"] else None
+        report = jobs.report_view(rid, json.loads(row["report_json"]), meta.get("camera")) if row["report_json"] else None
         return {"run_id": rid, "procedure_id": row["procedure_id"], "procedure_version": row["procedure_version"],
                 "status": {"queued": "running"}.get(row["status"], row["status"]),
                 "stages": json.loads(row["stages_json"] or "[]"),
@@ -367,9 +369,13 @@ def create_app(db_path: str = ":memory:", data_dir: str | None = None, start_job
         box = None
         if obj:
             f = min(range(len(ts.clip.frame_t_ms)), key=lambda i: abs(ts.clip.frame_t_ms[i] - t_ms))
-            obs = [o for tl in ts.tracklets if tl.prompt_id == f"obj:{obj}" for o in tl.obs if abs(o.f - f) <= 1]
+            # misma resolución de identidad que el motor (un prompt puede devolver varias instancias)
+            ids = sorted({tl.prompt_id[4:] for tl in ts.tracklets if tl.prompt_id.startswith("obj:")})
+            chosen, _ = resolve_identities(ts, ids, EngineParams())
+            near = [chosen.get(obj, {}).get(g) for g in (f, f - 1, f + 1)]
+            obs = [o for o in near if isinstance(o, FrameObs)]
             if obs:
-                box = max(obs, key=lambda o: o.score).bbox
+                box = obs[0].bbox
         try:
             jpg = video.evidence_frame(Path(row["video_path"]), t_ms, box, ts.clip.width, ts.clip.height)
         except video.VideoError as e:

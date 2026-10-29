@@ -29,6 +29,13 @@ class EngineParams:
     absence_probe_max: float = 0.30
     ref_score_min: float = 0.70
     border_margin: float = 0.02
+    dup_iou: float = 0.80  # dos cajas con este IoU son el mismo objeto físico (identidad)
+    # stacked_on (orden vertical al final, spec §4.8)
+    stack_overlap_min: float = 0.60  # solape horizontal / ancho del más estrecho
+    stack_rise_min: float = 0.25  # el de arriba debe estar más alto: (cy_base - cy_top) / alto_base
+    stack_gap_max: float = 0.50  # hueco vertical máx. entre el borde inferior del de arriba y el superior de la base
+    stack_agree: float = 0.70  # fracción de fotogramas que deben coincidir para decidir
+    stack_visible_ratio: float = 0.50  # fotogramas de la ventana final con ambos objetos visibles
 
     def n_frames(self, ms: float, fps: float) -> int:
         return max(1, math.ceil(ms * fps / 1000.0))

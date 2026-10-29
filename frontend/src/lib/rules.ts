@@ -26,6 +26,8 @@ export function ruleText(rule: Rule, objects: DraftObject[], zones: Zone[]): str
   switch (rule.type) {
     case 'before':
       return `${o(refObject(rule.first))} debe colocarse antes que ${o(refObject(rule.second))}.`;
+    case 'stacked_on':
+      return `${o(rule.object)} debe quedar apilado directamente sobre ${o(rule.base)} al terminar.`;
     case 'present_in_zone':
       return rule.at === 'during'
         ? `${o(rule.object)} debe aparecer en ${z(rule.zone)} durante la ejecución.`
@@ -71,6 +73,11 @@ export function validateDraft(objects: DraftObject[], zones: Zone[], rules: Rule
         issues.push({ ruleId: r.id, message: `La regla ${r.id} usa un objeto que no existe.` });
       else if (a === b)
         issues.push({ ruleId: r.id, message: `En la regla ${r.id} el primer y el segundo objeto son el mismo. Elige dos distintos.` });
+    } else if (r.type === 'stacked_on') {
+      if (!r.object || !objIds.has(r.object) || !r.base || !objIds.has(r.base))
+        issues.push({ ruleId: r.id, message: `Elige el objeto de arriba y su base para la regla ${r.id}.` });
+      else if (r.object === r.base)
+        issues.push({ ruleId: r.id, message: `En la regla ${r.id} el objeto y su base son el mismo. Elige dos distintos.` });
     } else {
       if (!r.object || !objIds.has(r.object))
         issues.push({ ruleId: r.id, message: `Elige un objeto para la regla ${r.id}.` });

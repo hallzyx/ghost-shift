@@ -5,6 +5,7 @@ import {
   CircleDot,
   Eye,
   FlaskConical,
+  Layers,
   ListOrdered,
   MapPin,
   MousePointer2,
@@ -126,12 +127,14 @@ export function RuleStudio({ proc, onSaved }: { proc: Procedure; onSaved: (p: Pr
 
   const updateRule = (r: Rule) => setRules((rs) => rs.map((x) => (x.id === r.id ? r : x)));
 
-  const addRule = (type: 'before' | 'present_in_zone') => {
+  const addRule = (type: 'before' | 'present_in_zone' | 'stacked_on') => {
     const id = nextRuleId(rules);
     const base: Rule =
       type === 'before'
         ? { id, type, enabled: true, origin: 'user', text_es: '', first: `place:${objects[0]?.id ?? 'A'}`, second: `place:${objects[1]?.id ?? objects[0]?.id ?? 'B'}` }
-        : { id, type, enabled: true, origin: 'user', text_es: '', object: objects[0]?.id ?? null, zone: zones.find((z) => z.role === 'target')?.id ?? zones[0]?.id ?? null, at: 'end' };
+        : type === 'stacked_on'
+          ? { id, type, enabled: true, origin: 'user', text_es: '', object: objects[1]?.id ?? objects[0]?.id ?? null, base: objects[0]?.id ?? null }
+          : { id, type, enabled: true, origin: 'user', text_es: '', object: objects[0]?.id ?? null, zone: zones.find((z) => z.role === 'target')?.id ?? zones[0]?.id ?? null, at: 'end' };
     base.text_es = ruleText(base, objects, zones);
     setRules((rs) => [...rs, base]);
     window.setTimeout(() => document.getElementById(`rule-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
@@ -390,6 +393,9 @@ export function RuleStudio({ proc, onSaved }: { proc: Procedure; onSaved: (p: Pr
               </Button>
               <Button size="sm" icon={<MapPin size={16} />} onClick={() => addRule('present_in_zone')} disabled={!zones.length}>
                 Posición en zona
+              </Button>
+              <Button size="sm" icon={<Layers size={16} />} onClick={() => addRule('stacked_on')} disabled={objects.length < 2}>
+                Apilado «A sobre B»
               </Button>
             </div>
           </Card>

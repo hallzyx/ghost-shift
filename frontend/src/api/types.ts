@@ -71,7 +71,7 @@ export interface Zone {
   polygon: Point[];
 }
 
-export type RuleType = 'present_in_zone' | 'in_zone_at' | 'before';
+export type RuleType = 'present_in_zone' | 'in_zone_at' | 'before' | 'stacked_on';
 export type RuleOrigin = 'proposed' | 'user' | 'hypothesis';
 
 export interface Rule {
@@ -85,6 +85,8 @@ export interface Rule {
   at?: 'end' | 'during' | null;
   first?: string | null;
   second?: string | null;
+  /** stacked_on: `object` debe quedar directamente encima de `base` al terminar. */
+  base?: string | null;
 }
 
 export interface TimelineEvent {
@@ -169,9 +171,26 @@ export interface ObservedEvent {
   timing_uncertain: boolean;
 }
 
+export type CameraStatus = 'ALIGNED' | 'RECALIBRATED' | 'UNCHECKED' | 'INCOMPATIBLE';
+
+/** Aviso de cámara: lo observa el registro de OpenCV; el motor decide con él. */
+export interface CameraInfo {
+  status: CameraStatus | string;
+  message_es: string;
+  aligned_to_reference: boolean;
+  /** Desplazamiento máximo del encuadre dentro del clip (fracción de la diagonal). */
+  max_shift: number | null;
+  /** Fracción de fotogramas que se pudieron alinear con la mesa. */
+  registered_ratio: number | null;
+  /** Desplazamiento respecto a la referencia (fracción de la diagonal). */
+  reference_shift: number | null;
+  warning: boolean;
+}
+
 export interface Report {
   verdict: Verdict;
-  camera_status: string;
+  camera_status: CameraStatus | string;
+  camera?: CameraInfo | null;
   blocking_issues: string[];
   rules: RuleResult[];
   events: ObservedEvent[];

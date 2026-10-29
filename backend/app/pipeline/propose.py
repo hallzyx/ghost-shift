@@ -8,8 +8,10 @@ from __future__ import annotations
 from statistics import median
 
 from ghostshift_engine import EngineParams, Procedure, TrackSet, compile_procedure
+from ghostshift_engine.contracts.tracks import FrameObs
 from ghostshift_engine.events import detect_events
-from ghostshift_engine.features import build_timelines
+from ghostshift_engine.features import build_timelines, resolve_identities
+from ghostshift_engine.rules import ON, stack_relation
 
 WORKSPACE = {"id": "ws", "role": "workspace", "label": "Área de trabajo",
              "polygon": [[0.02, 0.05], [0.98, 0.05], [0.98, 0.97], [0.02, 0.97]]}
@@ -17,14 +19,22 @@ EXPAND = 1.7  # la zona es la caja de reposo ampliada
 ORDER_TOLERANCE_S = 1.5
 
 
-def _best_obs(tracks: TrackSet, prompt: str) -> dict:
-    best = {}
-    for tl in tracks.tracklets:
-        if tl.prompt_id == prompt:
-            for o in tl.obs:
-                if o.f not in best or o.score > best[o.f].score:
-                    best[o.f] = o
-    return best
+def _resolved_obs(tracks: TrackSet, ids: list[str]) -> dict[str, dict]:
+    """Una observación por objeto y fotograma con la misma resolución de identidad que el motor."""
+    chosen, _ = resolve_identities(tracks, ids, EngineParams())
+    return {oid: {f: o for f, o in per.items() if isinstance(o, FrameObs)} for oid, per in chosen.items()}
+
+
+def _stack_pairs(rests: dict[str, tuple]) -> list[tuple[str, str]]:
+    """(arriba, base) para cada objeto que al final está directamente encima de otro (geometría del motor)."""
+    p = EngineParams()
+    pairs = []
+    for top, tb in sorted(rests.items()):
+        below = [(stack_relation(tb, bb, p)[1]["rise"], base) for base, bb in sorted(rests.items())
+                 if base != top and stack_relation(tb, bb, p)[0] == ON]
+        if below:
+            pairs.append((top, min(below)[1]))  # la base más cercana: la de menor elevación
+    return pairs
 
 
 def _iou(a, b) -> float:
@@ -73,8 +83,9 @@ def propose_draft(tracks: TrackSet, objects: list[dict], muse: dict | None = Non
     n = len(t)
     uncertainties = list(muse.get("uncertainties", []))
     obj_defs, rests, seen = [], {}, {}
+    resolved = _resolved_obs(tracks, [o["id"] for o in objects])
     for o in objects:
-        obs = _best_obs(tracks, f"obj:{o['id']}")
+        obs = resolved[o["id"]]
         label = o["label_es"]
         obj_defs.append({"id": o["id"], "description": label, "sam_prompt": o["sam_prompt"],
                          "confirmed_by_user": True,
@@ -121,6 +132,24 @@ def propose_draft(tracks: TrackSet, objects: list[dict], muse: dict | None = Non
     rules = [{"id": f"R{i}", "type": "in_zone_at", "enabled": True, "origin": "proposed", "object": oid,
               "zone": zid, "at": "end", "text_es": f"«{desc[oid]}» debe quedar en {zlabel[zid].lower()} al terminar."}
              for i, (oid, zid) in enumerate(sorted(obj_zone.items()), 1)]
+    # apilado: si al final un objeto está directamente encima de otro, la posición en zona no basta
+    # (unas cintas tiradas dentro de la zona también la cumplen); se propone la relación vertical.
+    stack_pairs = _stack_pairs(rests)
+    below = dict(stack_pairs)  # arriba -> base
+
+    def same_tower(a: str, b: str) -> bool:
+        def chain(x):
+            seen = []
+            while x in below and x not in seen:
+                seen.append(x)
+                x = below[x]
+            return set(seen) | {x}
+        return b in chain(a) or a in chain(b)
+
+    for top, base in stack_pairs:
+        rules.append({"id": f"R{len(rules) + 1}", "type": "stacked_on", "enabled": True, "origin": "proposed",
+                      "object": top, "base": base,
+                      "text_es": f"«{desc[top]}» debe quedar apilado directamente sobre «{desc[base]}» al terminar."})
 
     timeline: list[dict] = []
     first_place: dict[str, int] = {}
@@ -147,6 +176,11 @@ def propose_draft(tracks: TrackSet, objects: list[dict], muse: dict | None = Non
 
     ordered = sorted(first_place, key=first_place.get)
     for a, b in zip(ordered, ordered[1:]):
+        if same_tower(a, b):
+            # el orden de colocación ya está implícito en el apilado (no se puede poner algo sobre una base
+            # que aún no está) y con manos reales los instantes de colocación son poco precisos
+            uncertainties.append(f"No se propone «{desc[a]}» antes que «{desc[b]}»: el orden ya lo exige el apilado.")
+            continue
         ra, rb = muse_t.get(a), muse_t.get(b)
         disagree = ra is not None and rb is not None and ra > rb + ORDER_TOLERANCE_S * 1000
         rule = {"id": f"R{len(rules) + 1}", "type": "before", "enabled": not disagree,

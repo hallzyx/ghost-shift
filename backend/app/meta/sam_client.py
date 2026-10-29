@@ -7,6 +7,7 @@ import os
 
 import httpx
 
+from . import cache
 from .sam_adapter import ModelCallError, SamResult, parse_deltas
 
 BASE_URL = "https://api.meta.ai/v1"
@@ -21,7 +22,15 @@ def api_key() -> str:
 
 def segment(video: bytes, prompt: str, prompt_id: str, *, confidence: bool = True,
             mask_encoding: str | None = None, timeout: float = 600.0) -> SamResult:
-    """Una petición SAM por concepto. Vídeo MP4/MOV H.264 como data URL."""
+    """Una petición SAM por concepto. Vídeo MP4/MOV H.264 como data URL.
+
+    Si la misma petición ya se hizo sobre los mismos bytes, devuelve la respuesta grabada (``cache``).
+    """
+    ck = cache.key("sam", video, prompt=prompt, confidence=confidence, mask_encoding=mask_encoding)
+    hit = cache.get(ck)
+    if hit is not None:
+        return SamResult(prompt_id, parse_deltas(hit["deltas"]), hit.get("video_frames_processed"),
+                         hit.get("request_id"), cached=True)
     metadata = {}
     if confidence:
         metadata["include_confidence"] = "true"  # cadena, no booleano
@@ -55,4 +64,6 @@ def segment(video: bytes, prompt: str, prompt_id: str, *, confidence: bool = Tru
                         frames = (data.get("response", {}).get("usage") or {}).get("video_frames_processed")
     except httpx.HTTPError as e:
         raise ModelCallError("No se pudo contactar con SAM 3.1.", retryable=True) from e
-    return SamResult(prompt_id, parse_deltas(deltas), frames, request_id)
+    result = SamResult(prompt_id, parse_deltas(deltas), frames, request_id)
+    cache.put(ck, {"prompt": prompt, "deltas": deltas, "video_frames_processed": frames, "request_id": request_id})
+    return result

@@ -10,8 +10,7 @@ from .contracts.procedure import CompiledProcedure, Rule, parse_event_ref
 from .contracts.results import Event, Evidence, Outcome, Tri
 from .contracts.tracks import TrackSet
 from .events import EventLog
-from .features import VISIBLE, ObjectTimeline
-from .geometry import touches_border
+from .features import AMBIGUOUS, VISIBLE, ObjectTimeline
 
 
 @dataclass
@@ -97,13 +96,15 @@ def _in_zone_end(rule: Rule, ctx: Ctx) -> Outcome:
     vis = [f for f in win if tl.state[f] == VISIBLE]
     if len(vis) / len(win) < p.end_visible_ratio:
         allvis = tl.visible()
-        if allvis and not vis and allvis[-1] < win[0] and touches_border(tl.bbox[allvis[-1]], p.border_margin):
+        if allvis and not vis and allvis[-1] < win[0] and tl.at_edge(allvis[-1], p.border_margin):
             return Outcome(Tri.FALSE, "OBJECT_REMOVED",
                            [_state_ev(ctx, rule.object, allvis[-1], "última posición visible en el borde")])
         if not tl.detected_any():
             ev = absence_confirmed(ctx, rule.object)
             if ev:
                 return Outcome(Tri.FALSE, "OBJECT_NOT_FOUND", [ev])
+        if _mostly_ambiguous(tl, win):
+            return _unknown("IDENTITY_CONFLICT", ["distinguir el objeto de otro parecido al finalizar"])
         return _unknown("NOT_VISIBLE_AT_END", ["visibilidad del objeto al finalizar"])
     med = float(median(tl.inside[zone][vis]))
     kf = max(vis, key=lambda f: tl.score[f])
@@ -182,8 +183,79 @@ def eval_before(rule: Rule, ctx: Ctx) -> Outcome:
                     outs[0].evidence + outs[1].evidence)
 
 
+def _mostly_ambiguous(tl: ObjectTimeline, frames: list[int]) -> bool:
+    return bool(frames) and sum(tl.state[f] == AMBIGUOUS for f in frames) * 2 >= len(frames)
+
+
+ON, UNDER, APART, UNCLEAR = "ON", "UNDER", "APART", "UNCLEAR"
+
+
+def stack_relation(top, base, p: EngineParams) -> tuple[str, dict]:
+    """Relación vertical de dos cajas en un fotograma (coordenadas de imagen, y crece hacia abajo).
+
+    ON: «top» directamente encima de «base» (solape horizontal alto, más alto y sin hueco entre ambos);
+    UNDER: al revés; APART: uno al lado del otro o separados; UNCLEAR: el resto.
+    """
+    wt, wb = top[2] - top[0], base[2] - base[0]
+    ht, hb = top[3] - top[1], base[3] - base[1]
+    scale = max(1e-9, min(ht, hb))
+    overlap = max(0.0, min(top[2], base[2]) - max(top[0], base[0])) / max(1e-9, min(wt, wb))
+    rise = ((base[1] + base[3]) - (top[1] + top[3])) / 2 / scale  # >0: top más arriba que base
+    # hueco entre el borde inferior de top y el superior de base, relativo al MAYOR alto (una base muy tapada
+    # deja una caja estrecha y no debe convertir un hueco pequeño en «separados»)
+    gscale = max(1e-9, max(ht, hb))
+    gap_down = (base[1] - top[3]) / gscale
+    gap_up = (top[1] - base[3]) / gscale
+    m = {"overlap": round(overlap, 2), "rise": round(rise, 2)}
+    if overlap < 0.30:
+        return APART, m
+    if overlap >= p.stack_overlap_min:
+        if rise >= p.stack_rise_min:
+            return (ON if gap_down <= p.stack_gap_max else APART), m
+        if rise <= -p.stack_rise_min:
+            return (UNDER if gap_up <= p.stack_gap_max else APART), m
+    return UNCLEAR, m
+
+
+def eval_stacked_on(rule: Rule, ctx: Ctx) -> Outcome:
+    """«object» apilado directamente sobre «base» al terminar (spec §4.8). Sin IA: geometría de cajas en la
+    ventana final; decide solo si la mayoría de fotogramas con ambos visibles coincide."""
+    p, t = ctx.params, ctx.t
+    top, base = ctx.timelines[rule.object], ctx.timelines[rule.base]
+    win = [f for f in range(len(t)) if t[f] >= t[-1] - p.end_window_ms]
+
+    def usable(tl: ObjectTimeline, f: int) -> bool:
+        # en una torre las piezas de abajo se ven en parte (las tapa la de arriba): una caja reducida sin
+        # mano encima sirve para la relación vertical; la mano encima, no
+        return tl.state[f] == VISIBLE or (tl.partial[f] if f < len(tl.partial) else False)
+
+    both = [f for f in win if usable(top, f) and usable(base, f)]
+    if len(both) / len(win) < p.stack_visible_ratio:
+        if _mostly_ambiguous(top, win) or _mostly_ambiguous(base, win):
+            return _unknown("IDENTITY_CONFLICT", ["distinguir cada objeto de otro parecido al finalizar"])
+        missing = [o for o, tl in ((rule.object, top), (rule.base, base))
+                   if sum(usable(tl, f) for f in win) / len(win) < p.stack_visible_ratio]
+        return _unknown("STACK_NOT_VISIBLE_AT_END", [f"visibilidad de {o} al finalizar" for o in missing])
+    rel = {f: stack_relation(top.bbox[f], base.bbox[f], p) for f in both}
+    counts = {k: sum(1 for r, _ in rel.values() if r == k) for k in (ON, UNDER, APART, UNCLEAR)}
+    kf = max(both, key=lambda f: (rel[f][0] == max(counts, key=counts.get), top.score[f] + base.score[f], f))
+    m = rel[kf][1]
+    detail = (f"{rule.object} sobre {rule.base}: {counts[ON]}/{len(both)} fotogramas apilado, "
+              f"{counts[UNDER]} invertido, {counts[APART]} separado (solape {m['overlap']:.0%}, elevación {m['rise']:.2f})")
+    ev = [_state_ev(ctx, rule.object, kf, detail), _state_ev(ctx, rule.base, kf, f"base {rule.base}")]
+    n = len(both)
+    if counts[ON] / n >= p.stack_agree:
+        return Outcome(Tri.TRUE, "STACKED", ev)
+    if counts[UNDER] / n >= p.stack_agree:
+        return Outcome(Tri.FALSE, "STACK_INVERTED", ev)
+    if counts[APART] / n >= p.stack_agree:
+        return Outcome(Tri.FALSE, "NOT_STACKED", ev)
+    return _unknown("STACK_UNCLEAR", ["relación vertical estable entre ambos objetos"], ev)
+
+
 REGISTRY: dict[str, Callable[[Rule, Ctx], Outcome]] = {
     "present_in_zone": eval_present_in_zone,
     "in_zone_at": eval_in_zone_at,
     "before": eval_before,
+    "stacked_on": eval_stacked_on,
 }

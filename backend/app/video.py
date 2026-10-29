@@ -35,8 +35,6 @@ def normalize(src: Path, dst: Path) -> dict:
         raise VideoError(f"El video dura {dur:.1f} s; necesita al menos {MIN_S:.0f} s.")
     if dur > MAX_S:
         raise VideoError(f"El video dura {dur:.0f} s; el máximo en este prototipo es {MAX_S:.0f} s.")
-    if int(kv["height"]) > int(kv["width"]):
-        raise VideoError("El video está en vertical. Graba en horizontal con la cámara fija sobre la mesa.")
     vf = f"fps={ANALYSIS_FPS},scale='min({MAX_WIDTH},iw)':-2"
     r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-vf", vf, "-an",
                         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", "-movflags", "+faststart", str(dst)],
