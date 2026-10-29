@@ -1,113 +1,113 @@
-# GhostShift — Especificación técnica del MVP
+# GhostShift — Technical specification
 
-Deriva de `docs/PRD.md` (v1.0). El diseño detallado del motor verificador está en `docs/engine/VERIFIER_ENGINE_SPEC.md`. Lo que no esté verificado contra la API real se marca **[SUPUESTO]** y se comprueba el 28–29 oct (ver `BACKLOG.md`, tarea T0).
+Derived from `docs/PRD.md` (v1.0). The detailed design of the verifier engine is in `docs/engine/VERIFIER_ENGINE_SPEC.md`. Anything not verified against the real API is marked **[ASSUMPTION]** and must be checked during the API preflight (see `ROADMAP.md`).
 
-## 1. Decisiones de arquitectura
+## 1. Architecture decisions
 
-| Decisión | Elección | Motivo |
+| Decision | Choice | Reason |
 |---|---|---|
-| Backend | Python 3.11+ + FastAPI | Motor de reglas y geometría en Python puro (numpy/opencv); iteración rápida |
-| Frontend | React + Vite + TypeScript | Una sola SPA de 5 pantallas; sin SSR |
-| Persistencia | SQLite + carpeta `data/` por sesión | Sin infraestructura; cumple aislamiento por sesión y borrado explícito |
-| Trabajos largos | Cola en proceso (asyncio) + estado en SQLite | Suficiente para demo; sin Redis |
-| Veredicto | Motor determinista propio, sin red | PRD §11: el LLM nunca decide PASS/FAIL |
-| Modelos | Cliente fino `MetaClient` con `model` configurable por env | PRD §11: parámetros no prometidos |
+| Backend | Python 3.11+ + FastAPI | Rule engine and geometry in plain Python (numpy/opencv); fast iteration |
+| Frontend | React + Vite + TypeScript | A single 5-screen SPA; no SSR |
+| Persistence | SQLite + a `data/` folder per session | No infrastructure; meets per-session isolation and explicit deletion |
+| Long-running jobs | In-process queue (asyncio) + state in SQLite | Sufficient at this scale; no Redis |
+| Verdict | In-house deterministic engine, no network | PRD §11: the LLM never decides PASS/FAIL |
+| Models | Thin `MetaClient` with `model` configurable via env | PRD §11: no unmeasured parameters promised |
 
-Principio rector: **los modelos observan, el motor decide**. Muse Spark propone; SAM 3.1 localiza; el humano aprueba; el motor determinista juzga.
+Guiding principle: **the models observe, the engine decides**. Muse Spark proposes; SAM 3.1 locates; the human approves; the deterministic engine judges.
 
-## 2. Estructura del repositorio
+## 2. Repository structure
 
 ```
 ghost-shift/
-├─ docs/                    PRD, esta spec, backlog, engine/
+├─ docs/                    PRD, this spec, roadmap, engine/
 ├─ backend/
 │  ├─ app/
-│  │  ├─ api/               rutas FastAPI (procedures, runs, evidence)
+│  │  ├─ api/               FastAPI routes (procedures, runs, evidence)
 │  │  ├─ meta/              MetaClient: muse.py, sam.py, preflight.py, audit log
-│  │  ├─ pipeline/          analyze_reference.py, verify_run.py (orquestación)
-│  │  ├─ engine/            events.py, rules.py, verdict.py, identity.py (sin red)
+│  │  ├─ pipeline/          analyze_reference.py, verify_run.py (orchestration)
+│  │  ├─ engine/            events.py, rules.py, verdict.py, identity.py (no network)
 │  │  ├─ schemas/           pydantic: Procedure, Rule, Track, Event, Verdict
-│  │  ├─ storage/           SQLite + archivos, TTL y borrado
-│  │  └─ video/             validación, extracción de fotogramas, evidencia
-│  └─ tests/                engine/ (pistas sintéticas), contract/, e2e/
-├─ frontend/                Pantallas A–E (PRD §10)
-└─ eval/                    dataset de 12 ejecuciones + script de métricas
+│  │  ├─ storage/           SQLite + files, TTL and deletion
+│  │  └─ video/             validation, frame extraction, evidence
+│  └─ tests/                engine/ (synthetic tracks), contract/, e2e/
+├─ frontend/                Screens A–E (PRD §10)
+└─ eval/                    12-run dataset + metrics script
 ```
 
-`engine/` no importa nada de `meta/` ni de red: se prueba con pistas sintéticas.
+`engine/` imports nothing from `meta/` or the network: it is tested with synthetic tracks.
 
 ## 3. Pipeline
 
-### 3.1 Enseñar (referencia → reglas)
+### 3.1 Teach (reference → rules)
 
-1. **Preflight** (`video/validate`): MP4/WebM, duración y tamaño dentro de límites **[SUPUESTO: se leen de `dev.meta.ai/docs`]**, orientación, fps; rechazo accionable (EP-01).
-2. **Muse Spark** recibe el video y devuelve JSON estricto: `objects[]` (id, descripción corta, aspecto visual), `zones[]` (nombre, región relativa aproximada), `events[]` (`place:X` en zona Z, instante aproximado, confianza), `uncertainties[]`. Salida validada con pydantic; reintento con el error de validación como retroalimentación (máx. 2).
-3. **SAM 3.1** segmenta y sigue cada objeto propuesto (prompt = descripción) → `Track` por objeto: bbox/centroide/área por fotograma (máscara solo para fotogramas de evidencia), score, huecos.
-4. **Motor** ejecuta el detector de eventos sobre las pistas y **contrasta** con los eventos propuestos por Muse. Un evento propuesto que SAM no respalda se marca `hypothesis`, nunca se convierte en regla por defecto (EP-02).
-5. **Rule Studio**: el usuario activa/desactiva reglas, edita orden, confirma nombres y zonas → se guarda `Procedure vN` con `approved_by_user=true` (EP-03). Cualquier edición posterior crea `vN+1`.
+1. **Preflight** (`video/validate`): MP4/WebM, duration and size within limits **[ASSUMPTION: read from `dev.meta.ai/docs`]**, orientation, fps; actionable rejection (EP-01).
+2. **Muse Spark** receives the video and returns strict JSON: `objects[]` (id, short description, visual appearance), `zones[]` (name, approximate relative region), `events[]` (`place:X` in zone Z, approximate instant, confidence), `uncertainties[]`. Output is validated with pydantic; retry with the validation error as feedback (max 2).
+3. **SAM 3.1** segments and tracks each proposed object (prompt = description) → a `Track` per object: bbox/centroid/area per frame (mask only for evidence frames), score, gaps.
+4. **Engine** runs the event detector over the tracks and **cross-checks** it against the events proposed by Muse. A proposed event that SAM does not support is marked `hypothesis` and never becomes a rule by default (EP-02).
+5. **Rule Studio**: the user enables/disables rules, edits order, confirms names and zones → `Procedure vN` is saved with `approved_by_user=true` (EP-03). Any later edit creates `vN+1`.
 
-### 3.2 Verificar (ejecución → veredicto)
+### 3.2 Verify (run → verdict)
 
-1. Preflight del clip + comprobación de compatibilidad de cámara contra la referencia (ver engine §cámara).
-2. Muse Spark (opcional, acotado): correspondencia semántica de objetos entre clips cuando las descripciones aprobadas no bastan.
-3. SAM 3.1 con las descripciones aprobadas → `Track`s de la ejecución.
-4. Motor: eventos → evaluación regla a regla → veredicto global (EP-05: FAIL > REVIEW > PASS).
-5. Generación de evidencia (fotogramas recortados con máscara/caja, instantes) y entrada de auditoría.
+1. Clip preflight + camera compatibility check against the reference (see engine §camera).
+2. Muse Spark (optional, bounded): semantic matching of objects across clips when the approved descriptions are not enough.
+3. SAM 3.1 with the approved descriptions → the run's `Track`s.
+4. Engine: events → rule-by-rule evaluation → overall verdict (EP-05: FAIL > REVIEW > PASS).
+5. Evidence generation (cropped frames with mask/box, instants) and an audit entry.
 
-## 4. Modelo de datos (SQLite)
+## 4. Data model (SQLite)
 
 - `sessions(id, created_at, expires_at, consent_at)`
 - `procedures(id, session_id, name, version, status[draft|approved], rules_json, objects_json, reference_video, created_at)`
 - `runs(id, procedure_id, procedure_version, video_path, status, verdict, created_at)`
 - `rule_results(run_id, rule_id, verdict, reason, evidence_json)`
-- `model_calls(id, session_id, kind[muse|sam], model_version, request_id, latency_ms, status, error, created_at)` — auditoría (PRD §P0, §12); sin contenido personal.
+- `model_calls(id, session_id, kind[muse|sam], model_version, request_id, latency_ms, status, error, created_at)` — audit (PRD §P0, §12); no personal content.
 
-Restricción: `runs.procedure_version` solo puede referenciar procedimientos `approved` (EP-03).
+Constraint: `runs.procedure_version` can only reference `approved` procedures (EP-03).
 
-## 5. API REST (backend)
+## 5. REST API (backend)
 
-| Método | Ruta | Función |
+| Method | Route | Function |
 |---|---|---|
-| POST | `/sessions` | Crea sesión con consentimiento explícito |
-| POST | `/procedures` | Sube referencia, inicia análisis → `procedure_id` (draft) |
-| GET | `/procedures/{id}` | Estado por etapas: interpretación / segmentación / propuesta |
-| PUT | `/procedures/{id}/rules` | Guarda ediciones; `POST .../approve` crea versión aprobada |
-| POST | `/procedures/{id}/runs` | Sube ejecución; 409 si no hay versión aprobada |
-| GET | `/runs/{id}` | Veredicto, reglas, evidencia |
-| GET | `/runs/{id}/evidence/{n}` | Fotograma/máscara |
-| DELETE | `/sessions/{id}` | Borrado explícito de archivos y filas |
-| GET | `/audit/{session_id}` | Registro de llamadas y versiones |
+| POST | `/sessions` | Creates a session with explicit consent |
+| POST | `/procedures` | Uploads the reference, starts analysis → `procedure_id` (draft) |
+| GET | `/procedures/{id}` | Status by stage: interpretation / segmentation / proposal |
+| PUT | `/procedures/{id}/rules` | Saves edits; `POST .../approve` creates the approved version |
+| POST | `/procedures/{id}/runs` | Uploads a run; 409 if there is no approved version |
+| GET | `/runs/{id}` | Verdict, rules, evidence |
+| GET | `/runs/{id}/evidence/{n}` | Frame/mask |
+| DELETE | `/sessions/{id}` | Explicit deletion of files and rows |
+| GET | `/audit/{session_id}` | Log of calls and versions |
 
-Errores de modelo/red: respuesta con `retryable: true` y conservación de la sesión (EP-07). Segmentación vacía → estado `NO_OBSERVATION`, jamás PASS/FAIL.
+Model/network errors: response with `retryable: true` and the session is kept (EP-07). Empty segmentation → `NO_OBSERVATION` status, never PASS/FAIL.
 
 ## 6. Frontend
 
-Pantallas A–E del PRD §10. Componentes clave: `VideoPlayer` con marcas temporales sincronizadas; `RuleCard` (texto, estado propuesto/hipótesis, toggle, edición de orden); `Timeline` (eventos + regla incumplida, clic salta al instante); `EvidenceFrame` (máscara resaltada); `VerdictBadge` con texto + icono, no solo color. Estados vacío/error/reintento en cada pantalla.
+Screens A–E of PRD §10. Key components: `VideoPlayer` with synchronized timestamps; `RuleCard` (text, proposed/hypothesis state, toggle, order editing); `Timeline` (events + rule not met, click jumps to the instant); `EvidenceFrame` (highlighted mask); `VerdictBadge` with text + icon, not just color. Empty/error/retry states on every screen.
 
-## 7. Seguridad y privacidad
+## 7. Security and privacy
 
-- Claves Meta solo en backend (`.env`, nunca en bundle); `.env.example` sin valores.
-- Consentimiento previo a la primera subida (aviso de envío a proveedor de inferencia).
-- TTL de sesión configurable (por defecto 24 h) + `DELETE` explícito; logs sin datos personales.
-- Sin rutas públicas por defecto; IDs de sesión no enumerables (UUIDv4).
-- Aviso permanente: prototipo no apto para controles críticos.
+- Meta keys only in the backend (`.env`, never in the bundle); `.env.example` without values.
+- Consent before the first upload (notice that content is sent to an inference provider).
+- Configurable session TTL (24 h by default) + explicit `DELETE`; logs without personal data.
+- No public routes by default; session IDs are not enumerable (UUIDv4).
+- Permanent notice: not suitable for critical controls.
 
-## 8. Observabilidad
+## 8. Observability
 
-Cada llamada a modelo se registra en `model_calls`. Logs estructurados (JSON) con `request_id`, etapa, duración. Una vista `/audit` alimenta la prueba de honestidad de la demo (PRD §15): permite demostrar que la inferencia es en vivo y que no hay lógica por procedimiento.
+Every model call is recorded in `model_calls`. Structured logs (JSON) with `request_id`, stage and duration. An `/audit` view supports the honesty check (PRD §15): it makes it possible to show that inference is live and that there is no per-procedure logic.
 
-## 9. Pruebas
+## 9. Testing
 
-- **Unitarias del motor** (sin red): pistas sintéticas → eventos/veredictos; propiedades: segmentación vacía ⇒ nunca PASS; más incertidumbre nunca convierte REVIEW en PASS.
-- **Contrato**: validación de salidas de Muse/SAM con respuestas grabadas (solo para tests, nunca en la demo).
-- **E2E**: flujo completo con el dataset `eval/` y reporte de métricas (4/4 PASS, ≥5/6 FAIL, 2/2 REVIEW).
-- **Anti-hardcode**: test que falla si el repo contiene IDs/colores/secuencias de los procedimientos de demo dentro de `engine/` o `pipeline/`.
+- **Engine unit tests** (no network): synthetic tracks → events/verdicts; properties: empty segmentation ⇒ never PASS; more uncertainty never turns REVIEW into PASS.
+- **Contract**: validation of Muse/SAM outputs with recorded responses (for tests only, never in production runs).
+- **E2E**: full flow with the `eval/` dataset and a metrics report (4/4 PASS, ≥5/6 FAIL, 2/2 REVIEW).
+- **Anti-hardcode**: a test that fails if the repo contains IDs/colors/sequences of the evaluation procedures inside `engine/` or `pipeline/`.
 
-## 10. Supuestos abiertos (verificar el 28–29 oct)
+## 10. Open assumptions (verify during preflight)
 
-1. Entrada de video de Muse Spark: ¿URL, base64, fotogramas muestreados? Límites de tamaño/duración/fps.
-2. SAM 3.1: ¿acepta prompts de texto para video, devuelve máscaras por fotograma o solo por clip? Formato (RLE/PNG), IDs de objeto, latencia y costo.
-3. ¿Muse Spark soporta salida JSON estructurada/tool use de forma fiable? Si no, validación + reintento.
-4. Cuotas y rate limits para 12 ejecuciones + iteración.
+1. Muse Spark video input: URL, base64, sampled frames? Size/duration/fps limits.
+2. SAM 3.1: does it accept text prompts for video, does it return per-frame masks or only per-clip? Format (RLE/PNG), object IDs, latency and cost.
+3. Does Muse Spark reliably support structured JSON output/tool use? If not, validation + retry.
+4. Quotas and rate limits for 12 runs + iteration.
 
-Si (2) no entrega seguimiento temporal utilizable, el motor cae a **modo estados** (presencia/posición) — ver go/no-go condicional PRD §13.
+If (2) does not deliver usable temporal tracking, the engine falls back to **states mode** (presence/position) — see the conditional go/no-go in PRD §13.

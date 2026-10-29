@@ -1,93 +1,93 @@
-# GhostShift — Especificación técnica del motor determinista de eventos y veredictos
+# GhostShift — Technical specification of the deterministic event and verdict engine
 
-**Versión del documento:** 0.1 (borrador de diseño) — 28 oct 2026
-**Alcance:** motor que convierte pistas de SAM 3.1 + procedimiento aprobado en eventos, veredictos PASS/FAIL/REVIEW, evidencias y registro de auditoría. **Fuera de alcance:** frontend, orquestación y prompts de Muse Spark, llamadas HTTP a SAM (solo se define el contrato que el adaptador debe entregar).
-**Referencias:** PRD v1.0, §7 (EP-04, EP-05, EP-07), §8, §9, §11, §13, §17.
+**Document version:** 0.1 (design draft)
+**Scope:** the engine that turns SAM 3.1 tracks + an approved procedure into events, PASS/FAIL/REVIEW verdicts, evidence and an audit log. **Out of scope:** frontend, orchestration and Muse Spark prompts, HTTP calls to SAM (only the contract the adapter must deliver is defined).
+**References:** PRD v1.0, §7 (EP-04, EP-05, EP-07), §8, §9, §11, §13, §17.
 
-Convenciones: **[DECISIÓN]** = elección cerrada para el MVP con su justificación; **[SUPUESTO]** = hecho no verificado sobre APIs externas, con comprobación asignada al día 1; `t` siempre en milisegundos desde el inicio del clip; coordenadas siempre normalizadas a `[0,1]`.
-
----
-
-## 0. Principios de diseño
-
-1. **El veredicto es una función pura** `verify_run(procedimiento, pistas, calibración, pistas_identidad, parámetros) → RunReport`. Mismas entradas ⇒ salida byte a byte idéntica (excepto el sobre de auditoría con marcas de reloj). Sin red, sin aleatoriedad, sin LLM en la ruta del veredicto (PRD §11).
-2. **FAIL exige una observación contradictoria positiva** (un evento o estado visto con calidad suficiente). La falta de datos nunca produce FAIL; produce REVIEW (PRD §8, EP-07).
-3. **Una laguna nunca borra un cambio de estado**: lo convierte en un evento con intervalo temporal ancho. Así la degradación de la observación solo puede mover veredictos hacia REVIEW (propiedad de monotonía, §7.4).
-4. **Parámetros globales, nunca por vídeo ni por procedimiento** en el MVP. Evita el no-go del PRD §13 («valores fijos para cada video») y el riesgo crítico de hardcodeo (§17).
-5. **Tiempo en ms, espacio en unidades normalizadas**, de modo que cambios de fps o de ritmo no alteren la semántica.
+Conventions: **[DECISION]** = a closed choice for the MVP with its justification; **[ASSUMPTION]** = an unverified fact about external APIs, with a check assigned to the API preflight; `t` is always in milliseconds from the start of the clip; coordinates are always normalized to `[0,1]`.
 
 ---
 
-## 1. Contrato de entrada: pistas de SAM 3.1
+## 0. Design principles
 
-### 1.1 Frontera de responsabilidad
+1. **The verdict is a pure function** `verify_run(procedure, tracks, calibration, identity_tracks, params) → RunReport`. Same inputs ⇒ byte-for-byte identical output (except the audit envelope with clock timestamps). No network, no randomness, no LLM on the verdict path (PRD §11).
+2. **FAIL requires a positive contradicting observation** (an event or state seen with sufficient quality). Missing data never produces FAIL; it produces REVIEW (PRD §8, EP-07).
+3. **A gap never erases a state change**: it turns it into an event with a wide time interval. Thus degrading the observation can only move verdicts toward REVIEW (monotonicity property, §7.4).
+4. **Global parameters, never per video or per procedure** in the MVP. This avoids the PRD §13 no-go («fixed values for each video») and the critical hard-coding risk (§17).
+5. **Time in ms, space in normalized units**, so that changes in fps or pace do not alter the semantics.
 
-[DECISIÓN] Un **adaptador** fuera del motor (`backend/adapters/sam_adapter.py`) traduce la respuesta cruda de SAM a un `TrackSet` canónico. El motor nunca ve el formato del proveedor. Justificación: el API de SAM 3.1 no está verificado; aislarlo permite que el motor y sus tests avancen el 28–29 oct con pistas sintéticas y que un cambio de formato solo afecte al adaptador y a sus *golden tests* con respuestas crudas grabadas.
+---
 
-### 1.2 Esquema `TrackSet` (pydantic v2, `schema_version = "ghostshift.tracks/1"`)
+## 1. Input contract: SAM 3.1 tracks
+
+### 1.1 Responsibility boundary
+
+[DECISION] An **adapter** outside the engine (`backend/adapters/sam_adapter.py`) translates the raw SAM response into a canonical `TrackSet`. The engine never sees the provider's format. Justification: the SAM 3.1 API was not verified at design time; isolating it lets the engine and its tests move ahead with synthetic tracks and confines a format change to the adapter and its *golden tests* with recorded raw responses.
+
+### 1.2 `TrackSet` schema (pydantic v2, `schema_version = "ghostshift.tracks/1"`)
 
 ```python
 class ClipMeta(BaseModel):
-    clip_id: str                 # uuid de sesión
-    sha256: str                  # hash del archivo de vídeo
-    width: int; height: int      # píxeles del vídeo analizado
-    analysis_fps: float          # fps efectivo de los fotogramas enviados/devueltos
-    frame_t_ms: list[int]        # timestamp de cada fotograma analizado (monótono)
+    clip_id: str                 # session uuid
+    sha256: str                  # hash of the video file
+    width: int; height: int      # pixels of the analyzed video
+    analysis_fps: float          # effective fps of the frames sent/returned
+    frame_t_ms: list[int]        # timestamp of each analyzed frame (monotonic)
     duration_ms: int
 
-class FrameObs(BaseModel):       # observación de un tracklet en un fotograma
-    f: int                       # índice en frame_t_ms
-    score: float                 # [0,1], confianza de la instancia en ese fotograma
-    bbox: tuple[float,float,float,float]   # x0,y0,x1,y1 normalizados
-    mask_rle: RLE | None         # COCO RLE (counts, size) a resolución de análisis
-    # área, centroide y fracción en zona los calcula el motor (features.py)
+class FrameObs(BaseModel):       # observation of a tracklet in a frame
+    f: int                       # index into frame_t_ms
+    score: float                 # [0,1], confidence of the instance in that frame
+    bbox: tuple[float,float,float,float]   # x0,y0,x1,y1 normalized
+    mask_rle: RLE | None         # COCO RLE (counts, size) at analysis resolution
+    # area, centroid and fraction-in-zone are computed by the engine (features.py)
 
 class Tracklet(BaseModel):
-    track_id: str                # SOLO válido dentro de este clip
-    prompt_id: str               # objeto/concepto con que se pidió ("obj:A", "aux:hand")
-    obs: list[FrameObs]          # fotogramas SIN observación = ausentes en la lista
-    processed_frames: tuple[int,int]  # rango que SAM procesó (distingue "no visto" de "no procesado")
+    track_id: str                # ONLY valid within this clip
+    prompt_id: str               # object/concept it was requested with ("obj:A", "aux:hand")
+    obs: list[FrameObs]          # frames WITHOUT an observation = absent from the list
+    processed_frames: tuple[int,int]  # range SAM processed (distinguishes "not seen" from "not processed")
 
-class AbsenceProbe(BaseModel):   # resultado de re-sondeo explícito (ver §4.4)
+class AbsenceProbe(BaseModel):   # result of an explicit re-probe (see §4.4)
     prompt_id: str; frames: list[int]; max_score: float
 
 class TrackSet(BaseModel):
     schema_version: Literal["ghostshift.tracks/1"]
     clip: ClipMeta
-    model: ModelRef              # id ("sam-3.1"), versión devuelta, request_ids
+    model: ModelRef              # id ("sam-3.1"), returned version, request_ids
     tracklets: list[Tracklet]
     absence_probes: list[AbsenceProbe] = []
-    background_keyframes: list[str]  # rutas a 3 fotogramas (inicio/medio/fin) para calibración
+    background_keyframes: list[str]  # paths to 3 frames (start/middle/end) for calibration
 ```
 
-Decisiones del contrato:
+Contract decisions:
 
-- **[DECISIÓN] Los huecos se representan por ausencia en `obs`**, no por máscaras vacías, y `processed_frames` acota lo que realmente se procesó. Un fotograma fuera de `processed_frames` es *no observado*; dentro y sin `FrameObs` es *no detectado*. Ambos son distintos de *visible fuera de zona*.
-- **[DECISIÓN] Los IDs no persisten entre clips ni se asumen estables dentro del clip**: un objeto puede llegar fragmentado en varios tracklets (pérdida y readquisición). La agrupación tracklet→objeto la hace `identity.py` (§5).
-- **[DECISIÓN] Se pide un concepto auxiliar `aux:hand`** en la misma llamada de SAM. Sus máscaras solo se usan para marcar oclusión (§3.4), nunca para eventos. Si el API no admite el concepto, el motor degrada a la heurística de caída de área (§3.4) y lo registra.
-- **[DECISIÓN] `analysis_fps` objetivo = 10.** Una colocación humana dura 0,5–2 s; 10 fps da 5–20 fotogramas por colocación, suficiente para la ventana de estabilidad (600 ms = 6 fotogramas) con coste 3× menor que 30 fps. Si SAM impone su propio muestreo, el motor lo acepta: todo se expresa en ms.
+- **[DECISION] Gaps are represented by absence in `obs`**, not by empty masks, and `processed_frames` bounds what was actually processed. A frame outside `processed_frames` is *unobserved*; inside it and without a `FrameObs` it is *not detected*. Both are distinct from *visible outside the zone*.
+- **[DECISION] IDs do not persist between clips and are not assumed stable within the clip**: an object may arrive fragmented into several tracklets (loss and reacquisition). The tracklet→object grouping is done by `identity.py` (§5).
+- **[DECISION] An auxiliary concept `aux:hand` is requested** in the same SAM call. Its masks are used only to mark occlusion (§3.4), never for events. If the API does not support the concept, the engine degrades to the area-drop heuristic (§3.4) and logs it.
+- **[DECISION] Target `analysis_fps` = 10.** A human placement lasts 0.5–2 s; 10 fps gives 5–20 frames per placement, enough for the stability window (600 ms = 6 frames) at a 3× lower cost than 30 fps. If SAM imposes its own sampling, the engine accepts it: everything is expressed in ms.
 
-### 1.3 Supuestos sobre el API de SAM 3.1 y comprobaciones del día 1
+### 1.3 Assumptions about the SAM 3.1 API and preflight checks
 
-| # | [SUPUESTO] (no verificado en https://dev.meta.ai/docs/sam/overview) | Comprobación día 1 (clip de 10 s, 3 objetos + manos) | Si falla |
+| # | [ASSUMPTION] (not verified at https://dev.meta.ai/docs/sam/overview) | Preflight check (10 s clip, 3 objects + hands) | If it fails |
 |---|---|---|---|
-| S1 | Acepta **prompts de texto/concepto** en vídeo (no solo puntos/cajas) | Pedir "blue block", "hand"; ver si devuelve instancias | Prompt por caja del fotograma 0 tomada de la referencia vía Muse Spark; identidad depende más de la apariencia (§5) |
-| S2 | Devuelve **máscara por instancia y por fotograma** con ID estable dentro del clip | Contar IDs distintos por objeto a lo largo del clip | Si solo devuelve por fotograma sin tracking: asociación por IoU fotograma a fotograma en el adaptador (greedy, IoU≥0,3) |
-| S3 | Hay un **score por instancia y fotograma** en `[0,1]` | Histograma de scores con objeto visible vs tapado | Si el score es por pista: usar área relativa como proxy de calidad; recalibrar `score_visible` |
-| S4 | Formato de máscara **RLE/PNG/polígono** decodificable localmente | Decodificar y superponer 5 fotogramas | Adaptador convierte a RLE; si solo hay bbox, `mask_rle=None` (el motor usa bbox, §3.1) |
-| S5 | Correspondencia **índice de fotograma ↔ timestamp** recuperable; fps de muestreo controlable | Comparar nº de fotogramas devueltos con duración | Re-muestrear en cliente (ffmpeg) a 10 fps y enviar fotogramas o vídeo re-codificado |
-| S6 | Límites de duración/tamaño/latencia compatibles con clips de 20–60 s | Medir latencia y tamaño máximo aceptado | Recortar/comprimir; límite de producto = el medido |
-| S7 | Un objeto oculto produce **ausencia o score bajo**, no una máscara alucinada en otro sitio | Tapar un objeto 2 s con la mano | Subir `score_visible`; activar regla de salto espacial imposible (§3.5) |
-| S8 | Versión de modelo identificable y salida reproducible | Dos llamadas idénticas; comparar | Cachear `TrackSet` por `sha256` del vídeo + prompts; el motor se re-ejecuta sobre caché |
-| S9 | Un prompt puede devolver **varias instancias** | Dos objetos del mismo color | Resolución de duplicados en §5.2 |
+| S1 | Accepts **text/concept prompts** on video (not only points/boxes) | Request "blue block", "hand"; see whether instances are returned | Prompt by the box of frame 0 taken from the reference via Muse Spark; identity depends more on appearance (§5) |
+| S2 | Returns a **mask per instance and per frame** with a stable ID within the clip | Count distinct IDs per object across the clip | If it only returns per frame without tracking: frame-to-frame IoU association in the adapter (greedy, IoU≥0.3) |
+| S3 | There is a **score per instance and frame** in `[0,1]` | Histogram of scores with the object visible vs. covered | If the score is per track: use relative area as a quality proxy; recalibrate `score_visible` |
+| S4 | **RLE/PNG/polygon** mask format decodable locally | Decode and overlay 5 frames | The adapter converts to RLE; if only bbox, `mask_rle=None` (the engine uses the bbox, §3.1) |
+| S5 | **Frame index ↔ timestamp** mapping recoverable; controllable sampling fps | Compare the number of returned frames with the duration | Resample on the client (ffmpeg) to 10 fps and send frames or re-encoded video |
+| S6 | Duration/size/latency limits compatible with 20–60 s clips | Measure latency and maximum accepted size | Trim/compress; the product limit = the measured one |
+| S7 | A hidden object produces **absence or a low score**, not a hallucinated mask elsewhere | Cover an object with a hand for 2 s | Raise `score_visible`; enable the impossible-spatial-jump rule (§3.5) |
+| S8 | Identifiable model version and reproducible output | Two identical calls; compare | Cache the `TrackSet` by `sha256` of the video + prompts; the engine re-runs over the cache |
+| S9 | A prompt can return **several instances** | Two objects of the same color | Duplicate resolution in §5.2 |
 
-Todas las respuestas crudas del día 1 se guardan en `engine/tests/fixtures/sam_raw/` y se convierten en tests del adaptador.
+All raw responses from the preflight are saved in `engine/tests/fixtures/sam_raw/` and turned into adapter tests.
 
 ---
 
-## 2. Esquema de procedimiento y reglas (`ghostshift.procedure/2`)
+## 2. Procedure and rule schema (`ghostshift.procedure/2`)
 
-### 2.1 Esquema
+### 2.1 Schema
 
 ```json
 {
@@ -104,14 +104,14 @@ Todas las respuestas crudas del día 1 se guardan en `engine/tests/fixtures/sam_
     "background_fingerprint": {"keyframe": "ref_bg.png", "orb_keypoints": 412}
   },
   "objects": [
-    {"id": "A", "description": "componente azul", "confirmed_by_user": true,
-     "signature": {"hsv_hist": [/* 8x4x4 normalizado */], "area_norm": 0.012, "aspect": 1.4},
+    {"id": "A", "description": "blue component", "confirmed_by_user": true,
+     "signature": {"hsv_hist": [/* 8x4x4 normalized */], "area_norm": 0.012, "aspect": 1.4},
      "ref_keyframes": [{"f": 87, "mask_rle": {"…": "…"}}],
      "indistinguishable_from": []}
   ],
   "zones": [
     {"id": "workspace", "role": "workspace", "polygon": [[0.05,0.10],[0.95,0.10],[0.95,0.95],[0.05,0.95]]},
-    {"id": "left", "label": "zona izquierda", "role": "target", "source": "auto",
+    {"id": "left", "label": "left zone", "role": "target", "source": "auto",
      "polygon": [[0.12,0.40],[0.30,0.40],[0.30,0.62],[0.12,0.62]]}
   ],
   "rules": [
@@ -128,258 +128,286 @@ Todas las respuestas crudas del día 1 se guardan en `engine/tests/fixtures/sam_
 }
 ```
 
-### 2.2 Semántica de tipos
+### 2.2 Type semantics
 
-| Tipo | Campos | Verdadero cuando… |
+| Type | Fields | True when… |
 |---|---|---|
-| `present_in_zone` | `object`, `zone` (por defecto `workspace`) | Existe un tramo de fotogramas VISIBLE ≥ `presence_min_ms` con el objeto dentro de la zona (presencia del PRD §8) |
-| `in_zone_at` + `at:"end"` | `object`, `zone` | En la ventana final el objeto está VISIBLE y dentro de la zona (§4.3) |
-| `in_zone_at` + `at:"during"` | `object`, `zone`, `from` (ref. evento), `to` (`"end"` o ref. evento) | El objeto permanece en la zona en todo el intervalo, sin evento `remove` observado |
-| `before` | `first`, `second`: `place:<obj>` o `place:<obj>@<zona>`; `occurrence` (por defecto `"both_agree"`) | El evento `first` termina antes de que empiece `second` (intervalos, §4.5) |
+| `present_in_zone` | `object`, `zone` (default `workspace`) | There is a run of VISIBLE frames ≥ `presence_min_ms` with the object inside the zone (presence per PRD §8) |
+| `in_zone_at` + `at:"end"` | `object`, `zone` | In the final window the object is VISIBLE and inside the zone (§4.3) |
+| `in_zone_at` + `at:"during"` | `object`, `zone`, `from` (event ref.), `to` (`"end"` or event ref.) | The object stays in the zone throughout the interval, with no observed `remove` event |
+| `before` | `first`, `second`: `place:<obj>` or `place:<obj>@<zone>`; `occurrence` (default `"both_agree"`) | The `first` event ends before `second` starts (intervals, §4.5) |
 
-- [DECISIÓN] `place:X` **sin zona** significa «X se movió y quedó en reposo» en cualquier punto del `workspace` (§3.2), no «X entró en su zona objetivo». Justificación: PRD §9 exige «orden correcto, objeto fuera de zona ⇒ FAIL de posición, no de orden»; si `place:B` dependiera de la zona correcta, colocar B mal causaría también FAIL de orden. La variante `place:X@Z` existe para procedimientos donde el orden solo importa dentro de una zona.
-- [DECISIÓN] **Migración v1→v2:** el ejemplo del PRD `{"type":"present_in_zone", …, "at":"end"}` se migra automáticamente a `in_zone_at` con `at:"end"`; `present_in_zone` sin `at` mantiene su significado de presencia. La migración se registra en auditoría.
-- **Roles de zona:** `workspace` (exactamente una; área válida de la mesa), `target` (zonas de reglas), `staging` (opcional, origen de piezas; solo informativa).
+- [DECISION] `place:X` **without a zone** means «X moved and came to rest» anywhere in the `workspace` (§3.2), not «X entered its target zone». Justification: PRD §9 requires «correct order, object outside the zone ⇒ position FAIL, not order»; if `place:B` depended on the correct zone, placing B wrongly would also cause an order FAIL. The `place:X@Z` variant exists for procedures where order only matters inside a zone.
+- [DECISION] **v1→v2 migration:** the PRD example `{"type":"present_in_zone", …, "at":"end"}` is automatically migrated to `in_zone_at` with `at:"end"`; `present_in_zone` without `at` keeps its presence meaning. The migration is recorded in the audit log.
+- **Zone roles:** `workspace` (exactly one; the valid area of the table), `target` (rule zones), `staging` (optional, origin of the pieces; informational only).
 
-### 2.3 Validación al compilar (`compile_procedure`)
+### 2.3 Validation at compile time (`compile_procedure`)
 
-Rechazo (error accionable para Rule Studio): `approved_by_user=false`; referencias a objetos/zonas inexistentes; grafo de `before` con ciclos (orden topológico imposible); `first == second`; polígono no simple o área < 0,002; ninguna regla habilitada. Advertencia (no bloquea): dos zonas `target` con IoU > 0,3; objetos con `indistinguishable_from` no vacío (§5.3); regla `before` sobre objetos sin ninguna regla de posición (el `EVENT_NOT_OCCURRED` quedará en REVIEW, §4.5).
+Rejection (actionable error for Rule Studio): `approved_by_user=false`; references to nonexistent objects/zones; a `before` graph with cycles (impossible topological order); `first == second`; a non-simple polygon or area < 0.002; no enabled rule. Warning (does not block): two `target` zones with IoU > 0.3; objects with a non-empty `indistinguishable_from` (§5.3); a `before` rule on objects with no position rule (the `EVENT_NOT_OCCURRED` will stay in REVIEW, §4.5).
 
-Cada edición produce `version+1` con `parent_version` y nuevo `content_hash`; los `RunReport` almacenan `(procedure_id, version, content_hash)` y nunca se re-etiquetan (PRD §9 «edición posterior»). `CompiledProcedure` es un `dataclass(frozen=True)` con polígonos ya rasterizados por resolución.
+Each edit produces `version+1` with `parent_version` and a new `content_hash`; `RunReport`s store `(procedure_id, version, content_hash)` and are never relabeled (PRD §9 «later edits»). `CompiledProcedure` is a `dataclass(frozen=True)` with polygons already rasterized per resolution.
 
-### 2.4 Definición de zonas
+### 2.4 Zone definition
 
-[DECISIÓN] Las zonas `target` se **derivan automáticamente de la referencia**: bbox de la máscara del objeto en su reposo final estable, ampliada `max(30 % de su tamaño, 0,03)` por lado y recortada al `workspace`; Muse Spark solo propone la etiqueta («zona izquierda»). El `workspace` es el casco convexo de todas las posiciones de reposo observadas en la referencia, ampliado 0,05. Justificación: es determinista, auditable y no requiere editor de zonas (P1). El usuario puede cambiar etiqueta o desactivar la regla; la edición geométrica queda para P1.
+[DECISION] `target` zones are **derived automatically from the reference**: the bbox of the object's mask at its stable final rest, enlarged by `max(30 % of its size, 0.03)` per side and clipped to the `workspace`; Muse Spark only proposes the label («left zone»). The `workspace` is the convex hull of all rest positions observed in the reference, enlarged by 0.05. Justification: it is deterministic, auditable and does not require a zone editor (P1). The user can change the label or disable the rule; geometric editing is left for P1.
 
-### 2.5 Normalización ante cambios de encuadre e incompatibilidad de cámara
+### 2.5 Normalization under framing changes and camera incompatibility
 
-Las zonas viven en coordenadas normalizadas **del fotograma de referencia**. Para cada ejecución, `calibration.py` estima `T_ref→exec` y transforma los **polígonos** (no las pistas):
+Zones live in normalized coordinates **of the reference frame**. For each run, `calibration.py` estimates `T_ref→exec` and transforms the **polygons** (not the tracks):
 
-1. Fondo: mediana de los 3 `background_keyframes`, reducida a 320 px de ancho en gris, con objetos y manos enmascarados (máscaras del propio `TrackSet`).
-2. ORB (500 puntos) + `estimateAffinePartial2D` RANSAC (similitud de 4 GDL: traslación, rotación, escala uniforme) entre fondo de referencia y de ejecución.
-3. Fallback si `inliers < 25` o `inlier_ratio < 0,4` (mesa sin textura): correlación de fase (solo traslación) + NCC del fondo alineado.
+1. Background: median of the 3 `background_keyframes`, reduced to 320 px wide in grayscale, with objects and hands masked (masks from the `TrackSet` itself).
+2. ORB (500 points) + `estimateAffinePartial2D` RANSAC (4-DOF similarity: translation, rotation, uniform scale) between the reference and run backgrounds.
+3. Fallback if `inliers < 25` or `inlier_ratio < 0.4` (textureless table): phase correlation (translation only) + NCC of the aligned background.
 
-| Resultado | Condición | Efecto |
+| Result | Condition | Effect |
 |---|---|---|
-| `ALIGNED` | traslación ≤ 0,03·diag, rot ≤ 2°, escala ∈ [0,97, 1,03] | Aplica T silenciosamente |
-| `RECALIBRATED` | traslación ≤ 0,10·diag, rot ≤ 5°, escala ∈ [0,90, 1,10] | Aplica T; aviso visible en el informe |
-| `INCOMPATIBLE` | fuera de lo anterior, o relación de aspecto distinta (> 1 %) , o fallback con NCC < 0,6 | No se evalúan reglas; global REVIEW con `CAMERA_INCOMPATIBLE` y mensaje «recalibrar/regrabar» (PRD §9) |
+| `ALIGNED` | translation ≤ 0.03·diag, rot ≤ 2°, scale ∈ [0.97, 1.03] | Applies T silently |
+| `RECALIBRATED` | translation ≤ 0.10·diag, rot ≤ 5°, scale ∈ [0.90, 1.10] | Applies T; visible notice in the report |
+| `INCOMPATIBLE` | outside the above, or a different aspect ratio (> 1 %), or fallback with NCC < 0.6 | Rules are not evaluated; global REVIEW with `CAMERA_INCOMPATIBLE` and a «recalibrate/re-record» message (PRD §9) |
 
-**Movimiento intra-clip:** se estima T entre el fondo del primer y del último segundo. Si la traslación > 0,02·diag o rot > 1,5° ⇒ `CAMERA_MOVED`: todas las reglas dependientes de zonas pasan a REVIEW. Justificación: con cámara fija (requisito P0) es barato (2 estimaciones por clip, < 100 ms) y cualquier deriva mayor invalida las zonas más rápido de lo que podemos corregirlo con fiabilidad.
+**Intra-clip motion:** T is estimated between the background of the first and the last second. If translation > 0.02·diag or rot > 1.5° ⇒ `CAMERA_MOVED`: all zone-dependent rules go to REVIEW. Justification: with a fixed camera (P0 requirement) it is cheap (2 estimates per clip, < 100 ms), and any larger drift invalidates the zones faster than we can correct it reliably.
 
-[DECISIÓN] `calibration.py` es el único módulo que depende de OpenCV (`opencv-python-headless`), y su resultado entra a `verify_run` como dato (`CalibrationResult`). El núcleo (eventos/reglas/veredicto) se testea sin imágenes.
+[DECISION] `calibration.py` is the only module that depends on OpenCV (`opencv-python-headless`), and its result enters `verify_run` as data (`CalibrationResult`). The core (events/rules/verdict) is tested without images.
+
+**Implemented (after testing a real handheld video) — supersedes the above where they differ.** The first real video (handheld camera, ~14 % of the diagonal in shift) showed that «fixed camera or REVIEW» makes almost any phone recording unusable. It was implemented in `backend/app/camera.py` (the only module with OpenCV; the engine still has no images):
+1. Per frame: SIFT (1500 points, 480 px wide, grayscale) over the **background** — SAM boxes of objects and hands masked with a 15 % margin —, ratio test 0.75 and RANSAC **homography** (the table is a plane) to an **anchor** frame (the last one without a hand). If direct registration fails, it chains with the neighboring frame already registered. Sanity checks: ≥ 30 inliers and ≥ 25 %, convex quadrilateral, area 0.35–2.8 and **no reflection**.
+2. Across clips: the run's anchor → the reference's anchor (saved when the reference is analyzed).
+3. The **boxes** (not the polygons) are transformed to the reference anchor's coordinates; contact with the edge is computed on the original box (`FrameObs.edge`). Frames without registration are discarded.
+
+| Observation | `CalibrationResult` | Effect on the engine |
+|---|---|---|
+| shift < 0.012·diag and everything registered | `ALIGNED` | none |
+| it moved, ≥ 80 % of frames registered | `RECALIBRATED` | boxes compensated; notice in the report |
+| < 80 % registered | `INCOMPATIBLE`, `issue=CAMERA_UNSTABLE` | global REVIEW |
+| clip registered but not alignable with the reference | `camera_moved=True` | zone rules REVIEW `CAMERA_MOVED`; `before` and `stacked_on` are evaluated |
+| textureless background (< 80 features in the anchor) | `UNCHECKED` (+ `camera_moved` if the reference did have texture) | decided as before and a notice is shown |
 
 ---
 
-## 3. Detector de eventos `place:X` y `remove:X`
+## 3. `place:X` and `remove:X` event detector
 
-### 3.1 Rasgos por fotograma (`features.py`)
+### 3.1 Per-frame features (`features.py`)
 
-Para cada objeto ya resuelto (§5) y cada fotograma analizado `f`:
+For each already-resolved object (§5) and each analyzed frame `f`:
 
-- `area`, `centroid`, `bbox` (de la máscara; si `mask_rle=None`, del bbox).
-- `inside[z] = |máscara ∩ zona z| / |máscara|` con la zona rasterizada a la resolución de la máscara. [DECISIÓN] Fracción de área en vez de «centroide dentro»: tolera objetos grandes junto al borde y da un valor continuo para histéresis.
-- `hand_overlap = |bbox_objeto ∩ máscara_mano| / |bbox_objeto|`.
-- **Estado de observación** (`obs_state`):
-  - `VISIBLE`: score ≥ `score_visible` y `area ≥ frag_ratio · area_ref` y `hand_overlap < hand_occl`.
-  - `OCCLUDED`: detectado pero con score bajo, área fragmentada o mano encima.
-  - `ABSENT`: procesado y sin detección.
-  - `UNOBSERVED`: fuera de `processed_frames`.
-  `area_ref` = mediana del área en fotogramas con score ≥ 0,7 del propio clip (robusto a escala de cámara).
+- `area`, `centroid`, `bbox` (from the mask; if `mask_rle=None`, from the bbox).
+- `inside[z] = |mask ∩ zone z| / |mask|` with the zone rasterized at the mask's resolution. [DECISION] Area fraction instead of «centroid inside»: it tolerates large objects near the edge and gives a continuous value for hysteresis.
+- `hand_overlap = |object_bbox ∩ hand_mask| / |object_bbox|`.
+- **Observation state** (`obs_state`):
+  - `VISIBLE`: score ≥ `score_visible` and `area ≥ frag_ratio · area_ref` and `hand_overlap < hand_occl`.
+  - `OCCLUDED`: detected but with a low score, fragmented area or a hand on top.
+  - `ABSENT`: processed and not detected.
+  - `UNOBSERVED`: outside `processed_frames`.
+  `area_ref` = median area over frames with score ≥ 0.7 of the clip itself (robust to camera scale).
 
-Solo los fotogramas `VISIBLE` cuentan como evidencia positiva o contradictoria. `OCCLUDED/ABSENT/UNOBSERVED` son **lagunas**.
+Only `VISIBLE` frames count as positive or contradicting evidence. `OCCLUDED/ABSENT/UNOBSERVED` are **gaps**.
 
-### 3.2 Máquina de estados por objeto
+### 3.2 State machine per object
 
-Eventos genéricos de reposo, luego anotados con zona:
+Generic rest events, later annotated with the zone:
 
 ```
-estados: UNKNOWN_INIT → RESTING(pos) ⇄ MOVING → CANDIDATE(pos) → RESTING(pos')
-                         ↘ GAP (laguna) ↗
+states: UNKNOWN_INIT → RESTING(pos) ⇄ MOVING → CANDIDATE(pos) → RESTING(pos')
+                         ↘ GAP (gap) ↗
 
-para cada fotograma VISIBLE:
-  v = desplazamiento del centroide en la ventana de stable_ms
-  si estado ∈ {RESTING} y |centroid − pos_reposo| > still_eps:   → MOVING (t_move_lo = último VISIBLE en reposo)
-  si estado ∈ {MOVING, CANDIDATE}:
-      si v ≤ still_eps durante ≥ stable_ms de fotogramas VISIBLE:
-          si dist(pos_nueva, pos_reposo_anterior) ≥ move_min o el objeto entró desde fuera del workspace:
-              emitir place(X, zona=argmax_z inside[z] si ≥ θ_in, si no None,
-                           t_lo = t_move_lo, t_hi = t_inicio_ventana_estable)
-          → RESTING(pos_nueva)       # si no hubo desplazamiento suficiente: ajuste, no evento
-  histéresis de zona en RESTING: zona_actual cambia a None solo si inside < θ_out durante ≥ exit_ms VISIBLE
-      → emitir remove(X, zona, t_lo, t_hi)
+for each VISIBLE frame:
+  v = centroid displacement over the stable_ms window
+  if state ∈ {RESTING} and |centroid − rest_pos| > still_eps:   → MOVING (t_move_lo = last VISIBLE at rest)
+  if state ∈ {MOVING, CANDIDATE}:
+      if v ≤ still_eps for ≥ stable_ms of VISIBLE frames:
+          if dist(new_pos, previous_rest_pos) ≥ move_min or the object entered from outside the workspace:
+              emit place(X, zone=argmax_z inside[z] if ≥ θ_in, else None,
+                         t_lo = t_move_lo, t_hi = t_start_of_stable_window)
+          → RESTING(new_pos)       # if there was not enough displacement: adjustment, not an event
+  zone hysteresis in RESTING: current_zone changes to None only if inside < θ_out for ≥ exit_ms VISIBLE
+      → emit remove(X, zone, t_lo, t_hi)
 ```
 
-- **Estado inicial:** el primer tramo estable VISIBLE fija `RESTING(pos0)` **sin evento** y se marca `initial_rest = {pos0, zona}`. Un objeto que ya está en su zona desde el primer fotograma nunca genera `place` ⇒ base del caso «solo se ve el final» (§4.6).
-- **Entrada desde fuera de plano:** si el primer tramo VISIBLE comienza tocando el borde del `workspace` y se estabiliza dentro, se emite `place` con `t_lo` = primer fotograma visible (el objeto fue *traído*).
-- **Intervalo del evento:** `[t_lo, t_hi]` delimita con certeza el instante de la colocación: antes de `t_lo` estaba en otro sitio (visto), desde `t_hi` está quieto en el nuevo sitio (visto). El instante mostrado al usuario es `t_hi` (el primer fotograma de evidencia estable) y el fotograma clave es el de mayor score en la ventana estable.
+- **Initial state:** the first stable VISIBLE run sets `RESTING(pos0)` **without an event** and is marked `initial_rest = {pos0, zone}`. An object that is already in its zone from the first frame never generates `place` ⇒ the basis of the «only the end is visible» case (§4.6).
+- **Entry from outside the frame:** if the first VISIBLE run starts touching the `workspace` edge and stabilizes inside, `place` is emitted with `t_lo` = first visible frame (the object was *brought in*).
+- **Event interval:** `[t_lo, t_hi]` brackets the placement instant with certainty: before `t_lo` it was somewhere else (seen), from `t_hi` it is still at the new place (seen). The instant shown to the user is `t_hi` (the first stable evidence frame) and the key frame is the one with the highest score in the stable window.
 
-### 3.3 Parámetros (globales, `EngineParams` congelado, con hash en auditoría)
+### 3.3 Parameters (global, frozen `EngineParams`, with a hash in the audit log)
 
-| Parámetro | Defecto | Motivo |
+| Parameter | Default | Reason |
 |---|---|---|
 | `analysis_fps` | 10 | §1.2 |
-| `score_visible` | 0,50 | [SUPUESTO S3]; recalibrar con el histograma del día 1 |
-| `frag_ratio` | 0,55 | Una mano que tapa ~la mitad deja el objeto como OCCLUDED |
-| `hand_occl` | 0,15 | Solape mano/bbox por encima del cual la posición no es fiable |
-| `θ_in` / `θ_out` | 0,60 / 0,35 | Histéresis: evita parpadeo en el borde de la zona |
-| `stable_ms` | 600 | Persistencia mínima (PRD §8); > duración de pausas de agarre (~300 ms) |
-| `still_eps` | 0,010 · diag | Ruido de centroide de SAM esperado < 0,5 % |
-| `move_min` | 0,05 · diag | Distingue colocación real de reajuste |
-| `exit_ms` | 300 | Salida de zona confirmada |
-| `max_gap_ms` | 1000 | Puente de lagunas cortas (mano pasando) |
-| `end_window_ms` | 1000 | Ventana del estado final |
-| `end_visible_ratio` | 0,70 | Cobertura mínima en la ventana final |
-| `presence_min_ms` | 500 | Presencia sostenida |
-| `coverage_min` | 0,90 | Cobertura para afirmar «el evento no ocurrió» |
+| `score_visible` | 0.50 | [ASSUMPTION S3]; recalibrate with the preflight histogram |
+| `frag_ratio` | 0.55 | A hand covering ~half leaves the object as OCCLUDED |
+| `hand_occl` | 0.15 | Hand/bbox overlap above which the position is not reliable |
+| `θ_in` / `θ_out` | 0.60 / 0.35 | Hysteresis: avoids flicker at the zone edge |
+| `stable_ms` | 600 | Minimum persistence (PRD §8); > duration of grasp pauses (~300 ms) |
+| `still_eps` | 0.010 · diag | Expected SAM centroid noise < 0.5 % |
+| `move_min` | 0.05 · diag | Distinguishes a real placement from a readjustment |
+| `exit_ms` | 300 | Confirmed exit from the zone |
+| `max_gap_ms` | 1000 | Bridge for short gaps (a hand passing) |
+| `end_window_ms` | 1000 | Final-state window |
+| `end_visible_ratio` | 0.70 | Minimum coverage in the final window |
+| `presence_min_ms` | 500 | Sustained presence |
+| `coverage_min` | 0.90 | Coverage required to assert «the event did not occur» |
 
-Todos los umbrales temporales se convierten a fotogramas con `ceil(ms · fps / 1000)`. [DECISIÓN] No hay overrides por procedimiento en el MVP (principio 4); un cambio de defaults es un cambio de versión del motor y obliga a re-evaluar las 12 ejecuciones (§7.5).
+All temporal thresholds are converted to frames with `ceil(ms · fps / 1000)`. [DECISION] There are no per-procedure overrides in the MVP (principle 4); a change of defaults is an engine version change and forces re-evaluating the 12 runs (§7.5).
 
-### 3.4 Oclusión por manos
+### 3.4 Occlusion by hands
 
-1. Si hay máscara `aux:hand`: fotogramas con `hand_overlap ≥ hand_occl` ⇒ OCCLUDED.
-2. Si no hay (S1 falla): OCCLUDED si `area < frag_ratio · area_ref` o score cae > 0,3 respecto a la mediana móvil de 1 s.
-3. Durante OCCLUDED la máquina **no avanza ni reinicia**: no cuenta para la ventana de estabilidad ni para `exit_ms`. Consecuencia buscada: la colocación se fecha cuando la mano se retira y el objeto está quieto y visible, que es lo que realmente es observable.
+1. If there is an `aux:hand` mask: frames with `hand_overlap ≥ hand_occl` ⇒ OCCLUDED.
+2. If there is none (S1 fails): OCCLUDED if `area < frag_ratio · area_ref` or the score drops > 0.3 relative to the 1 s moving median.
+3. During OCCLUDED the machine **neither advances nor resets**: it does not count for the stability window or for `exit_ms`. Intended consequence: the placement is dated when the hand withdraws and the object is still and visible, which is what is actually observable.
 
-### 3.5 Lagunas (detección ausente)
+### 3.5 Gaps (absent detection)
 
-Al terminar una laguna `[g0, g1]` y volver a VISIBLE:
+When a gap `[g0, g1]` ends and the object returns to VISIBLE:
 
-- Si `g1 − g0 ≤ max_gap_ms` **y** `dist(pos_antes, pos_después) ≤ still_eps·3` ⇒ puente: se continúa como si no hubiera laguna.
-- Si la posición cambió ≥ `move_min` (o la laguna es larga y la posición cambió) ⇒ **evento con intervalo ancho**: `place` con `t_lo = g0` (último visible en el sitio anterior), `t_hi` = inicio de la nueva ventana estable, y `timing_uncertain = true`. No se descarta nunca (principio 3).
-- Si la posición no cambió pero la laguna > `max_gap_ms` ⇒ se registra `gap` sin evento; las reglas `during` que cubran la laguna no pueden ser TRUE (§4.4).
-- **Salto imposible:** si el objeto aparece a > 0,25·diag de su última posición en < 200 ms sin mano cerca, se trata como posible confusión de instancia: el tramo se marca `identity_suspect` y sus eventos llevan esa marca (⇒ REVIEW en reglas que los usen).
+- If `g1 − g0 ≤ max_gap_ms` **and** `dist(pos_before, pos_after) ≤ still_eps·3` ⇒ bridge: continue as if there had been no gap.
+- If the position changed ≥ `move_min` (or the gap is long and the position changed) ⇒ **event with a wide interval**: `place` with `t_lo = g0` (last visible at the previous place), `t_hi` = start of the new stable window, and `timing_uncertain = true`. It is never discarded (principle 3).
+- If the position did not change but the gap > `max_gap_ms` ⇒ a `gap` is recorded with no event; `during` rules covering the gap cannot be TRUE (§4.4).
+- **Impossible jump:** if the object appears > 0.25·diag from its last position in < 200 ms with no hand nearby, it is treated as a possible instance confusion: the run is marked `identity_suspect` and its events carry that mark (⇒ REVIEW in rules that use them).
 
-### 3.6 Reinicios y múltiples colocaciones
+### 3.6 Restarts and multiple placements
 
-- Cada `place` lleva un ordinal por objeto (`k = 1, 2, …`). Un reajuste < `move_min` no es colocación.
-- Se definen dos ocurrencias canónicas por objeto: **primera** (`k=1`) y **definitiva** (último `place` tras el cual el objeto no vuelve a moverse ≥ `move_min` hasta el final).
-- [DECISIÓN] `before` usa por defecto `occurrence:"both_agree"`: se evalúa con ambas ocurrencias; si coinciden, ese es el resultado; si discrepan ⇒ REVIEW con `ORDER_AMBIGUOUS_REPLACEMENT` y ambos pares de evidencia. Justificación: «A, B, reajusto A» y «B, retiro B, A, B (corrección)» tienen lecturas normativas opuestas que un operador humano decide mejor; el dataset de errores deliberados del PRD §13 no incluye correcciones, así que el coste en recall de FAIL es nulo allí. `occurrence:"first"` y `"definitive"` quedan disponibles en el esquema para que el usuario lo fije en Rule Studio.
+- Each `place` carries an ordinal per object (`k = 1, 2, …`). A readjustment < `move_min` is not a placement.
+- Two canonical occurrences are defined per object: **first** (`k=1`) and **definitive** (the last `place` after which the object does not move ≥ `move_min` again until the end).
+- [DECISION] `before` uses `occurrence:"both_agree"` by default: it is evaluated with both occurrences; if they agree, that is the result; if they disagree ⇒ REVIEW with `ORDER_AMBIGUOUS_REPLACEMENT` and both pairs of evidence. Justification: «A, B, readjust A» and «B, remove B, A, B (correction)» have opposite normative readings that a human operator decides better; the PRD §13 deliberate-error dataset does not include corrections, so the cost in FAIL recall is zero there. `occurrence:"first"` and `"definitive"` remain available in the schema for the user to set in Rule Studio.
 
 ---
 
-## 4. Lógica de veredicto
+## 4. Verdict logic
 
-### 4.1 Semántica de tres valores
+### 4.1 Three-valued semantics
 
-Cada evaluador devuelve `Outcome(value ∈ {TRUE, FALSE, UNKNOWN}, reason_code, evidence[], missing[])` con la correspondencia TRUE→PASS, FALSE→FAIL, UNKNOWN→REVIEW. Las combinaciones internas usan lógica de Kleene fuerte (`AND(FALSE, UNKNOWN)=FALSE`, `AND(TRUE, UNKNOWN)=UNKNOWN`).
+Each evaluator returns `Outcome(value ∈ {TRUE, FALSE, UNKNOWN}, reason_code, evidence[], missing[])` with the mapping TRUE→PASS, FALSE→FAIL, UNKNOWN→REVIEW. Internal combinations use strong Kleene logic (`AND(FALSE, UNKNOWN)=FALSE`, `AND(TRUE, UNKNOWN)=UNKNOWN`).
 
-**Compuertas previas** (se aplican antes del evaluador; cualquiera fuerza UNKNOWN para las reglas afectadas):
+**Preconditions** (applied before the evaluator; any of them forces UNKNOWN for the affected rules):
 
-| Compuerta | Ámbito | Razón |
+| Gate | Scope | Reason |
 |---|---|---|
-| `INSUFFICIENT_OBSERVATION` | global: ningún objeto con ≥ `presence_min_ms` VISIBLE | PRD §9 «sin objetos detectables»; EP-07 |
-| `CAMERA_INCOMPATIBLE` / `CAMERA_MOVED` | global / reglas con zona | §2.5 |
-| `IDENTITY_UNCONFIRMED` | reglas que mencionan un objeto ambiguo | §5 |
-| `IDENTITY_SUSPECT` | reglas que usan un evento marcado | §3.5 |
+| `INSUFFICIENT_OBSERVATION` | global: no object with ≥ `presence_min_ms` VISIBLE | PRD §9 «no detectable objects»; EP-07 |
+| `CAMERA_INCOMPATIBLE` / `CAMERA_MOVED` | global / rules with a zone | §2.5 |
+| `IDENTITY_UNCONFIRMED` | rules that mention an ambiguous object | §5 |
+| `IDENTITY_SUSPECT` | rules that use a flagged event | §3.5 |
 
-### 4.2 Regla de oro de FAIL
+### 4.2 The golden rule of FAIL
 
-[DECISIÓN] Un evaluador solo puede devolver FALSE si adjunta al menos una `Evidence` de tipo `event` o `state` construida con fotogramas VISIBLE (o un `AbsenceProbe` confirmado, §4.4). El agregador lo comprueba y degrada a UNKNOWN (`INTERNAL_NO_EVIDENCE`, registrado como bug) si no se cumple. Esto implementa EP-05 («un FAIL contiene… un evento que la contradice») como invariante, no como convención.
+[DECISION] An evaluator may only return FALSE if it attaches at least one `Evidence` of type `event` or `state` built with VISIBLE frames (or a confirmed `AbsenceProbe`, §4.4). The aggregator checks this and downgrades to UNKNOWN (`INTERNAL_NO_EVIDENCE`, logged as a bug) if it is not met. This implements EP-05 («a FAIL contains… an event that contradicts it») as an invariant, not as a convention.
 
 ### 4.3 `in_zone_at` (`at: end`)
 
-Ventana `W` = últimos `end_window_ms` analizados. `V` = fotogramas VISIBLE de `W`.
+Window `W` = the last `end_window_ms` analyzed. `V` = VISIBLE frames of `W`.
 
 1. `|V|/|W| < end_visible_ratio`:
-   - si el objeto salió observablemente del `workspace` (últimos VISIBLE tocando borde con velocidad hacia fuera) ⇒ FALSE `OBJECT_REMOVED`;
-   - si no hay ninguna detección en todo el clip y la ausencia está confirmada (§4.4) ⇒ FALSE `OBJECT_NOT_FOUND`;
-   - si no ⇒ UNKNOWN `NOT_VISIBLE_AT_END` (incluye manos tapando: PRD §9).
-2. Mediana de `inside[zona]` sobre `V` ≥ θ_in ⇒ TRUE.
-3. Mediana ≤ θ_out ⇒ FALSE `OUT_OF_ZONE`, con evidencia del fotograma clave y la zona en la que sí está (si alguna).
-4. Entre ambos ⇒ UNKNOWN `BORDERLINE_POSITION`.
+   - if the object observably left the `workspace` (last VISIBLE touching the edge with outward velocity) ⇒ FALSE `OBJECT_REMOVED`;
+   - if there is no detection at all in the clip and the absence is confirmed (§4.4) ⇒ FALSE `OBJECT_NOT_FOUND`;
+   - otherwise ⇒ UNKNOWN `NOT_VISIBLE_AT_END` (includes hands covering: PRD §9).
+2. Median of `inside[zone]` over `V` ≥ θ_in ⇒ TRUE.
+3. Median ≤ θ_out ⇒ FALSE `OUT_OF_ZONE`, with evidence of the key frame and the zone it is in (if any).
+4. In between ⇒ UNKNOWN `BORDERLINE_POSITION`.
 
-`at: during` en `[t(from), t(to)]` (con `t` = `t_hi` de los eventos): FALSE si hay un `remove` observado de esa zona en el intervalo; TRUE si cobertura VISIBLE ≥ 0,8, todas las lagunas puenteadas y mediana inside ≥ θ_in; UNKNOWN en otro caso (incluido evento `from` no ocurrido: `ANCHOR_EVENT_MISSING`).
+`at: during` over `[t(from), t(to)]` (with `t` = `t_hi` of the events): FALSE if there is an observed `remove` from that zone in the interval; TRUE if VISIBLE coverage ≥ 0.8, all gaps bridged and median inside ≥ θ_in; UNKNOWN otherwise (including the `from` event not having occurred: `ANCHOR_EVENT_MISSING`).
 
-### 4.4 `present_in_zone` y ausencia
+### 4.4 `present_in_zone` and absence
 
-TRUE si existe un tramo VISIBLE ≥ `presence_min_ms` con inside ≥ θ_in. Para FALSE se exige **ausencia confirmada**: (a) la segmentación global no está vacía (otros objetos sí se ven), (b) la calibración es `ALIGNED/RECALIBRATED`, (c) la zona no está ocluida por manos en la ventana final, y (d) el adaptador ejecutó un `AbsenceProbe` (re-sondeo del mismo prompt sobre 5 fotogramas finales) con `max_score < 0,3`, cuando ese mismo prompt detectó el objeto en la referencia con score ≥ 0,7. Si falta cualquiera ⇒ UNKNOWN `ABSENCE_UNCONFIRMED`. Justificación: el PRD exige a la vez detectar «falta un objeto» (error típico) y no producir FAIL por segmentación vacía; la condición (a)+(d) separa «SAM no funciona en este clip» de «el objeto no está».
+TRUE if there is a VISIBLE run ≥ `presence_min_ms` with inside ≥ θ_in. For FALSE, **confirmed absence** is required: (a) the global segmentation is not empty (other objects are seen), (b) the calibration is `ALIGNED/RECALIBRATED`, (c) the zone is not occluded by hands in the final window, and (d) the adapter ran an `AbsenceProbe` (re-probe of the same prompt over the 5 final frames) with `max_score < 0.3`, when that same prompt detected the object in the reference with score ≥ 0.7. If any is missing ⇒ UNKNOWN `ABSENCE_UNCONFIRMED`. Justification: the PRD requires both detecting «an object is missing» (a typical error) and not producing a FAIL from empty segmentation; condition (a)+(d) separates «SAM does not work on this clip» from «the object is not there».
 
-### 4.5 `before` (precedencia por intervalos)
+### 4.5 `before` (precedence by intervals)
 
 ```python
 def eval_before(ev1: Event|None, ev2: Event|None, ctx) -> Outcome:
     if ev1 and ev2:
         if ev1.t_hi < ev2.t_lo:  return TRUE(evidence=[ev1, ev2])
         if ev2.t_hi < ev1.t_lo:  return FALSE("ORDER_VIOLATED", evidence=[ev2, ev1])
-        return UNKNOWN("ORDER_OVERLAP", missing=["separación temporal entre colocaciones"])
+        return UNKNOWN("ORDER_OVERLAP", missing=["time separation between placements"])
     if ev2 and not ev1:
-        # B se colocó; ¿A estuvo observado sin colocarse hasta t_lo(B)?
+        # B was placed; was A observed without being placed until t_lo(B)?
         if ctx.only_initial_rest(A) and ctx.visible_coverage(A, 0, ev2.t_lo) >= coverage_min:
             return FALSE("FIRST_EVENT_MISSING_BEFORE_SECOND", evidence=[ev2, state(A at ev2.t_lo)])
         return UNKNOWN("ORDER_NOT_OBSERVED")
     if ev1 and not ev2:
-        return UNKNOWN("EVENT_NOT_OCCURRED")       # la omisión la juzgan las reglas de posición
-    return UNKNOWN("ORDER_NOT_OBSERVED")          # ninguno observado
+        return UNKNOWN("EVENT_NOT_OCCURRED")       # the omission is judged by the position rules
+    return UNKNOWN("ORDER_NOT_OBSERVED")          # neither observed
 ```
 
-- [DECISIÓN] El orden se decide por **separación estricta de intervalos**, no por comparar instantes puntuales. Colocaciones simultáneas (dos manos) o con lagunas solapadas ⇒ REVIEW. Esto hace la regla monótona respecto a la pérdida de fotogramas.
-- [DECISIÓN] Si el segundo evento no ocurre, `before` queda REVIEW y no FAIL: no hay ningún evento que contradiga el orden, y la falta de B la reporta su regla de posición (aislamiento de causas, PRD §9). Si el procedimiento no tiene regla de posición para B, el compilador ya lo advirtió (§2.3).
+- [DECISION] Order is decided by **strict separation of intervals**, not by comparing point instants. Simultaneous placements (two hands) or ones with overlapping gaps ⇒ REVIEW. This makes the rule monotonic with respect to frame loss.
+- [DECISION] If the second event does not occur, `before` stays REVIEW and not FAIL: no event contradicts the order, and the absence of B is reported by its position rule (cause isolation, PRD §9). If the procedure has no position rule for B, the compiler already warned about it (§2.3).
 
-### 4.6 Agregación global
+### 4.6 Global aggregation
 
 ```
-si compuerta global activa       → REVIEW (con blocking_issue; UI: «sin veredicto»)
-si ∃ regla habilitada FAIL        → FAIL
-si ∃ regla habilitada REVIEW      → REVIEW
-si todas PASS y n_habilitadas ≥ 1 → PASS
+if a global gate is active           → REVIEW (with blocking_issue; UI: «no verdict»)
+if ∃ enabled rule FAIL               → FAIL
+if ∃ enabled rule REVIEW             → REVIEW
+if all PASS and n_enabled ≥ 1        → PASS
 ```
 
-Las reglas deshabilitadas se reportan como `SKIPPED` y no participan. Precedencia FAIL > REVIEW (EP-05): es segura porque un FAIL nunca puede depender de un objeto con identidad no confirmada (compuerta §4.1).
+Disabled rules are reported as `SKIPPED` and do not participate. FAIL > REVIEW precedence (EP-05) is safe because a FAIL can never depend on an object with unconfirmed identity (gate §4.1).
 
-### 4.7 Tabla de casos límite (PRD §9 y adicionales)
+### 4.7 Table of edge cases (PRD §9 and additional)
 
-| Caso | Observación típica | Resultado por regla | Global |
+| Case | Typical observation | Result per rule | Global |
 |---|---|---|---|
-| Vídeo sin objetos detectables | Ningún tracklet con ≥ 500 ms VISIBLE | Todas REVIEW `INSUFFICIENT_OBSERVATION` | REVIEW «sin veredicto», recomendar regrabar |
-| Manos tapan objeto al final | `|V|/|W|` < 0,7 por `hand_overlap` | `in_zone_at end` REVIEW `NOT_VISIBLE_AT_END`; `before` puede seguir decidido | REVIEW (salvo otro FAIL) |
-| Mismos componentes, orden incorrecto | place:B.t_hi < place:A.t_lo | `in_zone_at` PASS ×N; `before` FAIL `ORDER_VIOLATED` | FAIL |
-| Orden correcto, objeto fuera de zona | place:B en zona None/otra, tras A | `before` PASS; `in_zone_at(B)` FAIL `OUT_OF_ZONE` | FAIL |
-| Dos objetos casi idénticos | margen de asignación < δ (§5) | Reglas de ambos REVIEW `IDENTITY_UNCONFIRMED` hasta confirmación humana | REVIEW → re-evaluación tras confirmar |
-| Solo se ve el final | Todos en `initial_rest` dentro de zona; 0 eventos `place` | `in_zone_at end` PASS; `before` REVIEW `ORDER_NOT_OBSERVED` | REVIEW |
-| Cambio fuerte de cámara | Calibración `INCOMPATIBLE` | No se evalúan | REVIEW `CAMERA_INCOMPATIBLE`, pedir recalibración |
-| Cámara movida a mitad del clip | Deriva > 0,02·diag | Reglas con zona REVIEW `CAMERA_MOVED` | REVIEW |
-| Colocación simultánea A y B | Intervalos solapados | `before` REVIEW `ORDER_OVERLAP` | REVIEW |
-| A colocado, B, A reajustado (≥ move_min) | primera: A<B; definitiva: B<A | `before` REVIEW `ORDER_AMBIGUOUS_REPLACEMENT` | REVIEW |
-| Objeto falta del todo | Sin detección, probe < 0,3, otros visibles | `present_in_zone`/`in_zone_at` FAIL `OBJECT_NOT_FOUND` | FAIL |
-| Segmentación vacía por fallo del modelo | Ningún objeto detectado | (= primera fila) | REVIEW, nunca PASS/FAIL |
-| Objeto retirado de la mesa al final | Sale por el borde, visible | `in_zone_at end` FAIL `OBJECT_REMOVED` | FAIL |
-| Edición posterior de reglas | Nueva `version` | Informes previos conservan su `(version, hash)` | — |
-| Procedimiento no aprobado | `approved_by_user=false` | Rechazo al compilar | No se ejecuta |
+| Video without detectable objects | No tracklet with ≥ 500 ms VISIBLE | All REVIEW `INSUFFICIENT_OBSERVATION` | REVIEW «no verdict», recommend re-recording |
+| Hands cover an object at the end | `|V|/|W|` < 0.7 due to `hand_overlap` | `in_zone_at end` REVIEW `NOT_VISIBLE_AT_END`; `before` may still be decided | REVIEW (unless another FAIL) |
+| Same components, wrong order | place:B.t_hi < place:A.t_lo | `in_zone_at` PASS ×N; `before` FAIL `ORDER_VIOLATED` | FAIL |
+| Correct order, object outside the zone | place:B in zone None/other, after A | `before` PASS; `in_zone_at(B)` FAIL `OUT_OF_ZONE` | FAIL |
+| Two nearly identical objects | assignment margin < δ (§5) | Rules of both REVIEW `IDENTITY_UNCONFIRMED` until human confirmation | REVIEW → re-evaluation after confirming |
+| Only the end is visible | All in `initial_rest` inside a zone; 0 `place` events | `in_zone_at end` PASS; `before` REVIEW `ORDER_NOT_OBSERVED` | REVIEW |
+| Strong camera change | Calibration `INCOMPATIBLE` | Not evaluated | REVIEW `CAMERA_INCOMPATIBLE`, ask for recalibration |
+| Camera moved mid-clip | Drift > 0.02·diag | Zone rules REVIEW `CAMERA_MOVED` | REVIEW |
+| Simultaneous placement of A and B | Overlapping intervals | `before` REVIEW `ORDER_OVERLAP` | REVIEW |
+| A placed, B, A readjusted (≥ move_min) | first: A<B; definitive: B<A | `before` REVIEW `ORDER_AMBIGUOUS_REPLACEMENT` | REVIEW |
+| Object missing altogether | No detection, probe < 0.3, others visible | `present_in_zone`/`in_zone_at` FAIL `OBJECT_NOT_FOUND` | FAIL |
+| Empty segmentation due to model failure | No object detected | (= first row) | REVIEW, never PASS/FAIL |
+| Object removed from the table at the end | Leaves through the edge, visible | `in_zone_at end` FAIL `OBJECT_REMOVED` | FAIL |
+| Later rule edit | New `version` | Previous reports keep their `(version, hash)` | — |
+| Unapproved procedure | `approved_by_user=false` | Rejected at compile time | Not run |
+| Tower covered by the hand at the end | < 50 % of the final window with both objects usable | `stacked_on` REVIEW `STACK_NOT_VISIBLE_AT_END` | REVIEW |
+| Two prompts mark the same piece | IoU ≥ 0.8 between distinct objects | `IDENTITY_CONFLICT` | REVIEW |
+
+### 4.8 `stacked_on` (vertical order at the end) and identity between similar objects
+
+`{"type":"stacked_on","object":"C","base":"A"}`: «C» ends up **directly on top of** «A» at the end. Compilation: both exist and are distinct, an object has at most one base, no cycles. A tower of N pieces = N−1 rules.
+
+Evaluation in the final window (`end_window_ms`), per frame with both objects usable (VISIBLE, or OCCLUDED only due to a reduced box **with no hand on top**: in a tower the bottom piece only shows its side):
+- horizontal overlap / width of the narrower one < 0.30 ⇒ `APART`;
+- overlap ≥ `stack_overlap_min` (0.60) and rise `(cy_base − cy_top)/min(height)` ≥ `stack_rise_min` (0.25) and gap `(y0_base − y1_top)/max(height)` ≤ `stack_gap_max` (0.50) ⇒ `ON`; symmetric ⇒ `UNDER`; with a larger gap ⇒ `APART`; otherwise `UNCLEAR`.
+- ≥ 70 % `ON` ⇒ PASS `STACKED`; ≥ 70 % `UNDER` ⇒ FAIL `STACK_INVERTED`; ≥ 70 % `APART` ⇒ FAIL `NOT_STACKED`; otherwise REVIEW `STACK_UNCLEAR`. With < 50 % of the window usable ⇒ REVIEW (`STACK_NOT_VISIBLE_AT_END` or `IDENTITY_CONFLICT`). Evidence: key frame of both objects with the count.
+
+Limitation: with a single oblique camera, «behind» can look like «on top of» (same projection). It is not resolved; it is documented.
+
+**Per-frame identity** (`features.resolve_identities`): SAM returns all the instances that match the concept (real: «green tape roll» marked all 3 rolls). Order: (1) an object with a single candidate fixes it; (2) from one with several, those that coincide (IoU ≥ `dup_iou`) with another object's fixed box are removed; (3) if several remain, continuity of the SAM tracking id relative to the nearest resolved frame; (4) otherwise `AMBIGUOUS` (neither visible nor absent); (5) two objects with the same box ⇒ both `AMBIGUOUS`.
 
 ---
 
-## 5. Correspondencia de identidad entre clips
+## 5. Identity matching across clips
 
-### 5.1 Estrategia
+### 5.1 Strategy
 
-1. **Prompts por objeto confirmado.** En la ejecución, SAM recibe un prompt por objeto con la `description` confirmada (y alias propuestos por Muse Spark). Cada tracklet llega con `prompt_id` (S1). Esto ya separa la mayoría de los casos de objetos diferenciables.
-2. **Agrupación intra-clip:** tracklets con el mismo `prompt_id` que no se solapan en el tiempo y cuya unión es espacialmente continua (fin→inicio ≤ `max_gap_ms` y ≤ 0,1·diag, o el siguiente empieza en el borde) se unen en una *pista de objeto*. Tracklets solapados del mismo prompt con score ≥ 0,5 ⇒ **candidatos competidores** (S9).
-3. **Coste de asignación** objeto `o` ↔ pista candidata `p` (todo en `[0,1]`):
-   `c = 0,35·(1 − prompt_match) + 0,40·d_Bhattacharyya(hsv_o, hsv_p) + 0,15·min(1, |ln(area_p/area_o)|/ln 2) + 0,10·min(1, |ln(aspect_p/aspect_o)|/ln 2)`
-   con `prompt_match = 1` si la pista vino del prompt de `o`, `0` si no. Firmas HSV calculadas sobre píxeles enmascarados en fotogramas VISIBLE de score ≥ 0,7.
-4. **Asignación óptima** por enumeración de permutaciones (≤ 4 objetos ⇒ ≤ 24 asignaciones; sin SciPy).
-5. **Muse Spark como señal, no como juez.** Solo si hay ambigüedad (5.2), el orquestador puede pedir a Muse Spark que empareje recortes con descripciones; su respuesta entra como `IdentityHint(source="muse", mapping, confidence)` cacheada y registrada. El motor la usa para **ordenar** las opciones mostradas al humano, nunca para cerrar una ambigüedad por sí sola. Justificación: PRD §8 exige confirmación si es ambiguo y §11 prohíbe delegar el veredicto en el LLM; una identidad errónea genera FAIL falsos.
+1. **Prompts per confirmed object.** On the run, SAM receives one prompt per object with the confirmed `description` (and aliases proposed by Muse Spark). Each tracklet arrives with `prompt_id` (S1). This already separates most cases of distinguishable objects.
+2. **Intra-clip grouping:** tracklets with the same `prompt_id` that do not overlap in time and whose union is spatially continuous (end→start ≤ `max_gap_ms` and ≤ 0.1·diag, or the next one starts at the edge) are merged into an *object track*. Overlapping tracklets of the same prompt with score ≥ 0.5 ⇒ **competing candidates** (S9).
+3. **Assignment cost** object `o` ↔ candidate track `p` (everything in `[0,1]`):
+   `c = 0.35·(1 − prompt_match) + 0.40·d_Bhattacharyya(hsv_o, hsv_p) + 0.15·min(1, |ln(area_p/area_o)|/ln 2) + 0.10·min(1, |ln(aspect_p/aspect_o)|/ln 2)`
+   with `prompt_match = 1` if the track came from `o`'s prompt, `0` otherwise. HSV signatures are computed over masked pixels in VISIBLE frames with score ≥ 0.7.
+4. **Optimal assignment** by permutation enumeration (≤ 4 objects ⇒ ≤ 24 assignments; no SciPy).
+5. **Muse Spark as a signal, not a judge.** Only if there is ambiguity (5.2), the orchestrator may ask Muse Spark to match crops with descriptions; its answer enters as a cached, logged `IdentityHint(source="muse", mapping, confidence)`. The engine uses it to **order** the options shown to the human, never to close an ambiguity by itself. Justification: PRD §8 requires confirmation if the match is ambiguous and §11 forbids delegating the verdict to the LLM; a wrong identity generates false FAILs.
 
-[DECISIÓN] **La posición final (zona) no se usa como señal de identidad.** El PRD menciona «verificación de zona», pero usarla para asignar identidad es circular: favorecería que cada objeto «esté en su zona» y ocultaría precisamente el error «A en la zona de B». La zona solo se usa *después*, como comprobación de coherencia: si dos objetos con firmas cercanas (d < 0,25) aparecen intercambiados respecto a la referencia, se marca la asignación como ambigua.
+[DECISION] **The final position (zone) is not used as an identity signal.** The PRD mentions «zone verification», but using it to assign identity is circular: it would favor each object being «in its zone» and would hide precisely the «A in B's zone» error. The zone is only used *afterwards*, as a coherence check: if two objects with close signatures (d < 0.25) appear swapped relative to the reference, the assignment is marked ambiguous.
 
-### 5.2 Umbrales de ambigüedad
+### 5.2 Ambiguity thresholds
 
-| Condición | Estado | Efecto |
+| Condition | State | Effect |
 |---|---|---|
-| Coste de la mejor asignación para `o` ≤ 0,45 y margen frente a la segunda mejor asignación global ≥ 0,15 | `AUTO_CONFIRMED` | Se evalúan reglas |
-| Margen < 0,15, o coste > 0,45, o candidatos competidores sin resolver, o intercambio sospechoso (§5.1) | `NEEDS_CONFIRMATION` | Reglas del objeto REVIEW `IDENTITY_UNCONFIRMED`; `RunReport.identity_requests` lista recortes candidatos |
-| Ningún candidato con coste ≤ 0,7 | `NOT_FOUND` | Tratado como ausencia candidata (§4.4) |
+| Best-assignment cost for `o` ≤ 0.45 and margin over the second-best global assignment ≥ 0.15 | `AUTO_CONFIRMED` | Rules are evaluated |
+| Margin < 0.15, or cost > 0.45, or unresolved competing candidates, or suspected swap (§5.1) | `NEEDS_CONFIRMATION` | The object's rules REVIEW `IDENTITY_UNCONFIRMED`; `RunReport.identity_requests` lists candidate crops |
+| No candidate with cost ≤ 0.7 | `NOT_FOUND` | Treated as a candidate absence (§4.4) |
 
-La confirmación humana entra como `IdentityHint(source="user")`, que fija la asignación; `verify_run` se re-ejecuta (barato: no hay llamadas a modelo) y el informe registra quién confirmó.
+Human confirmation enters as `IdentityHint(source="user")`, which fixes the assignment; `verify_run` is re-run (cheap: no model calls) and the report records who confirmed.
 
-### 5.3 Objetos indistinguibles en la referencia
+### 5.3 Indistinguishable objects in the reference
 
-Al compilar, si dos objetos tienen `d_Bhattacharyya < 0,20` y ratio de área ∈ [0,8, 1,25], se marcan `indistinguishable_from` y Rule Studio pide una descripción diferenciadora. Si el usuario acepta igualmente, toda ejecución pedirá confirmación de identidad para ese par (PRD §9 «dos objetos casi idénticos»).
+At compile time, if two objects have `d_Bhattacharyya < 0.20` and an area ratio ∈ [0.8, 1.25], they are marked `indistinguishable_from` and Rule Studio asks for a differentiating description. If the user accepts anyway, every run will ask for identity confirmation for that pair (PRD §9 «two nearly identical objects»).
 
 ---
 
-## 6. Evidencia y registro de auditoría
+## 6. Evidence and audit log
 
 ### 6.1 `RunReport` (`ghostshift.report/1`)
 
@@ -387,22 +415,22 @@ Al compilar, si dos objetos tienen `d_Bhattacharyya < 0,20` y ratio de área ∈
 class Evidence(BaseModel):
     kind: Literal["event", "state", "absence", "gap", "calibration"]
     object_id: str | None; zone_id: str | None
-    track_ids: list[str]                 # tracklets del clip de ejecución
-    t_ms: int                            # instante mostrado (t_hi para eventos)
+    track_ids: list[str]                 # tracklets of the run clip
+    t_ms: int                            # instant shown (t_hi for events)
     t_interval_ms: tuple[int, int] | None
-    frames: list[int]                    # fotogramas que soportan la afirmación
-    keyframe: int                        # fotograma a resaltar en la UI
+    frames: list[int]                    # frames that support the claim
+    keyframe: int                        # frame to highlight in the UI
     mask_rle: RLE | None; bbox: tuple[float,float,float,float] | None
-    zone_polygon_exec: list[tuple[float,float]] | None   # zona ya transformada
+    zone_polygon_exec: list[tuple[float,float]] | None   # zone already transformed
     metrics: dict[str, float]            # inside, score, visible_ratio, hand_overlap…
     flags: list[str]                     # timing_uncertain, identity_suspect…
 
 class RuleResult(BaseModel):
     rule_id: str; rule_text_es: str
     verdict: Literal["PASS", "FAIL", "REVIEW", "SKIPPED"]
-    reason_code: str                     # enumerado cerrado (§4)
-    explanation_es: str                  # plantilla determinista por reason_code
-    evidence: list[Evidence]; missing: list[str]   # qué dato faltó (REVIEW)
+    reason_code: str                     # closed enumeration (§4)
+    explanation_es: str                  # deterministic template per reason_code
+    evidence: list[Evidence]; missing: list[str]   # which data was missing (REVIEW)
 
 class RunReport(BaseModel):
     schema_version: Literal["ghostshift.report/1"]
@@ -410,32 +438,32 @@ class RunReport(BaseModel):
     blocking_issue: str | None
     procedure_ref: ProcedureRef          # id, version, content_hash
     rules: list[RuleResult]
-    events: list[Event]                  # línea de tiempo completa (también los no usados)
+    events: list[Event]                  # full timeline (including unused events)
     identity: IdentityResolution; calibration: CalibrationResult
     identity_requests: list[IdentityRequest]
-    provenance: Provenance               # ver 6.2
+    provenance: Provenance               # see 6.2
 ```
 
-[DECISIÓN] Las explicaciones en español salen de **plantillas por `reason_code`** («B se colocó en t=4,2 s, antes que A (t=7,9 s)»), no de un LLM. Muse Spark puede reformularlas en la UI, pero el texto canónico es el de la plantilla.
+[DECISION] The Spanish explanations come from **templates per `reason_code`** («B was placed at t=4.2 s, before A (t=7.9 s)»), not from an LLM. Muse Spark may rephrase them in the UI, but the canonical text is the template's.
 
-### 6.2 Auditoría
+### 6.2 Audit
 
-- Archivo **JSONL append-only** por sesión (`audit/<session>.jsonl`), una línea por hecho: `procedure_compiled`, `model_call` (modelo, versión, `request_id`, latencia, `cache_hit`, hash de prompts), `trackset_ingested` (sha256), `calibration`, `identity_resolved` (fuente: auto/user/muse), `verdict`.
-- `Provenance` en cada informe: `engine_version` (semver + git sha), `params_hash`, `procedure.content_hash`, `trackset_sha256`, `video_sha256`, `identity_hints_hash`.
-- **Reproducción:** `ghostshift-engine replay <run_id>` reconstruye el informe desde el `TrackSet` cacheado y compara hash; cualquier diferencia es un fallo de determinismo. Esto es la prueba ante el jurado de que no hay resultados precalculados por vídeo (PRD §4.2, §15).
-- Privacidad (PRD §12): el log guarda hashes y metadatos, no fotogramas; los recortes de evidencia viven con la sesión y se borran con ella.
+- **Append-only JSONL** file per session (`audit/<session>.jsonl`), one line per fact: `procedure_compiled`, `model_call` (model, version, `request_id`, latency, `cache_hit`, prompt hash), `trackset_ingested` (sha256), `calibration`, `identity_resolved` (source: auto/user/muse), `verdict`.
+- `Provenance` in each report: `engine_version` (semver + git sha), `params_hash`, `procedure.content_hash`, `trackset_sha256`, `video_sha256`, `identity_hints_hash`.
+- **Replay:** `ghostshift-engine replay <run_id>` rebuilds the report from the cached `TrackSet` and compares the hash; any difference is a determinism failure. This is the proof, for any reviewer, that no per-video results are precomputed (PRD §4.2, §15).
+- Privacy (PRD §12): the log stores hashes and metadata, not frames; evidence crops live with the session and are deleted with it.
 
 ---
 
-## 7. Estrategia de pruebas
+## 7. Testing strategy
 
-### 7.1 Herramientas
+### 7.1 Tools
 
-`pytest` + `hypothesis` (pruebas de propiedades). Ningún test del motor llama a modelos ni a red; un test de importación falla si `ghostshift_engine` importa `requests`, `httpx`, `urllib3` o `socket`.
+`pytest` + `hypothesis` (property tests). No engine test calls models or the network; an import test fails if `ghostshift_engine` imports `requests`, `httpx`, `urllib3` or `socket`.
 
-### 7.2 Generador de pistas sintéticas (`synth.py`)
+### 7.2 Synthetic track generator (`synth.py`)
 
-DSL de escenario → `TrackSet` + verdad de terreno:
+A scenario DSL → `TrackSet` + ground truth:
 
 ```python
 Scenario(
@@ -443,114 +471,114 @@ Scenario(
   objects={"A": Rect(w=.06, h=.05, start=(.15, .80)), "B": Rect(w=.05, h=.05, start=(.30, .80))},
   zones=std_zones("left", "right"),
   actions=[Move("A", to="left", t0=3000, dur=1200), Move("B", to="right", t0=7000, dur=1000)],
-  occlusions=[Hand(over="A", t0=18500, t1=20000)],     # genera también la pista aux:hand
+  occlusions=[Hand(over="A", t0=18500, t1=20000)],     # also generates the aux:hand track
   dropouts=[Dropout("B", t0=7200, t1=7800)],
   noise=Noise(centroid_sigma=.003, score_mu=.85, score_sigma=.05, id_switch_prob=.0),
   camera=Shift(dx=.0, dy=.0, rot_deg=0),
-  start_ms=0,                                          # >0 simula «solo se ve el final»
+  start_ms=0,                                          # >0 simulates «only the end is visible»
 ).render() -> (TrackSet, GroundTruth(events=[…], expected={"R1": "PASS", …}))
 ```
 
-Las máscaras se rasterizan como rectángulos/elipses a baja resolución y se codifican en RLE, para ejercitar el camino completo `features → events → rules`. Los movimientos usan trayectorias con levantamiento (escala aparente y mano encima) para simular agarres. `id_switch_prob` fragmenta tracklets para probar la agrupación.
+Masks are rasterized as rectangles/ellipses at low resolution and encoded in RLE, to exercise the full `features → events → rules` path. Movements use trajectories with lift-off (apparent scale and a hand on top) to simulate grasps. `id_switch_prob` fragments tracklets to test grouping.
 
-### 7.3 Tests unitarios (por módulo)
+### 7.3 Unit tests (per module)
 
-- `geometry`: RLE ida/vuelta; `inside` de rectángulos conocidos; transformación de polígonos.
-- `events`: una colocación limpia ⇒ 1 `place` con `t_hi − t_real ∈ [stable_ms, stable_ms+100]`; reajuste < `move_min` ⇒ 0 eventos; histéresis en el borde (oscilación de inside 0,5↔0,55) ⇒ 0 `remove`; laguna corta en reposo ⇒ puente; laguna con desplazamiento ⇒ evento `timing_uncertain`; entrada desde fuera de plano.
-- `rules`/`verdict`: una prueba por fila de la tabla §4.7, construida con `synth.py`.
-- `identity`: 3 objetos de colores distintos con IDs barajados ⇒ asignación correcta; dos objetos con la misma firma ⇒ `NEEDS_CONFIRMATION`; intercambio de zonas con firmas parecidas ⇒ ambiguo.
-- `contracts`: migración v1→v2 del ejemplo literal del PRD §8; rechazo de ciclos en `before`.
-- `adapter` (fuera del motor): golden tests con `fixtures/sam_raw/` del día 1.
+- `geometry`: RLE round trip; `inside` of known rectangles; polygon transformation.
+- `events`: a clean placement ⇒ 1 `place` with `t_hi − t_real ∈ [stable_ms, stable_ms+100]`; readjustment < `move_min` ⇒ 0 events; hysteresis at the edge (inside oscillating 0.5↔0.55) ⇒ 0 `remove`; short gap at rest ⇒ bridge; gap with displacement ⇒ `timing_uncertain` event; entry from outside the frame.
+- `rules`/`verdict`: one test per row of the §4.7 table, built with `synth.py`.
+- `identity`: 3 objects of distinct colors with shuffled IDs ⇒ correct assignment; two objects with the same signature ⇒ `NEEDS_CONFIRMATION`; zone swap with similar signatures ⇒ ambiguous.
+- `contracts`: v1→v2 migration of the literal PRD §8 example; rejection of cycles in `before`.
+- `adapter` (outside the engine): golden tests with `fixtures/sam_raw/` from the preflight.
 
-### 7.4 Propiedades invariantes (hypothesis sobre escenarios aleatorios válidos)
+### 7.4 Invariant properties (hypothesis over random valid scenarios)
 
-| ID | Propiedad |
+| ID | Property |
 |---|---|
-| P1 | **Nunca PASS ni FAIL con segmentación vacía**: `TrackSet` sin tracklets de objeto ⇒ global REVIEW y todas las reglas REVIEW |
-| P2 | **Monotonía de REVIEW**: añadir lagunas/oclusiones o bajar scores solo puede cambiar PASS→REVIEW o FAIL→REVIEW; nunca PASS↔FAIL |
-| P3 | Todo FAIL tiene ≥ 1 `Evidence` con `frames` no vacíos y fotogramas VISIBLE |
-| P4 | Invariancia a permutación/renombrado de `track_id` |
-| P5 | Invariancia al ritmo: escalar los tiempos de las acciones ×[0,6, 1,8] (manteniendo pausas ≥ `stable_ms`) no cambia veredictos |
-| P6 | Invariancia al fps: el mismo escenario a 8, 10 y 15 fps produce los mismos veredictos |
-| P7 | Desplazamiento de cámara dentro de `ALIGNED` con calibración aplicada ⇒ mismos veredictos |
-| P8 | Determinismo: dos ejecuciones ⇒ `RunReport` idéntico (hash) |
-| P9 | Deshabilitar una regla no cambia el veredicto de las demás |
-| P10 | Agregación: global == función de §4.6 sobre los veredictos por regla |
-| P11 | «Mismo estado final, orden distinto»: para todo par de escenarios que solo difieren en el orden de `Move`, las reglas `in_zone_at end` coinciden y al menos una `before` difiere |
+| P1 | **Never PASS or FAIL with empty segmentation**: a `TrackSet` without object tracklets ⇒ global REVIEW and all rules REVIEW |
+| P2 | **REVIEW monotonicity**: adding gaps/occlusions or lowering scores can only change PASS→REVIEW or FAIL→REVIEW; never PASS↔FAIL |
+| P3 | Every FAIL has ≥ 1 `Evidence` with non-empty `frames` and VISIBLE frames |
+| P4 | Invariance to permutation/renaming of `track_id` |
+| P5 | Invariance to pace: scaling action times ×[0.6, 1.8] (keeping pauses ≥ `stable_ms`) does not change verdicts |
+| P6 | Invariance to fps: the same scenario at 8, 10 and 15 fps produces the same verdicts |
+| P7 | Camera shift within `ALIGNED` with calibration applied ⇒ same verdicts |
+| P8 | Determinism: two runs ⇒ identical `RunReport` (hash) |
+| P9 | Disabling a rule does not change the verdict of the others |
+| P10 | Aggregation: global == the §4.6 function over the per-rule verdicts |
+| P11 | «Same final state, different order»: for every pair of scenarios that differ only in the order of `Move`, the `in_zone_at end` rules coincide and at least one `before` differs |
 
-P2 es la más delicada; si hypothesis encuentra un contraejemplo, se corrige el detector (no se relaja la propiedad).
+P2 is the most delicate; if hypothesis finds a counterexample, the detector is fixed (the property is not relaxed).
 
-### 7.5 Evaluación del dataset de 12 ejecuciones (PRD §13)
+### 7.5 Evaluation of the 12-run dataset (PRD §13)
 
-1. **Antes de ejecutar nada**, se escribe `dataset/manifest.yaml`: por clip, procedimiento, tipo (correcto / error tipo X / insuficiente), veredicto global esperado, veredicto esperado por regla e instantes de colocación anotados a mano (±200 ms). Se versiona en git (commit anterior a la primera evaluación).
-2. Distribución recomendada de los 6 errores (3 por procedimiento): orden invertido con mismo estado final (≥ 1 por procedimiento, PRD §13), objeto en zona equivocada, objeto ausente, dos objetos intercambiados de zona, objeto retirado al final. Insuficientes (2): manos sobre la zona al final; grabación que empieza tras las colocaciones.
-3. Los `TrackSet` se cachean tras la única llamada a SAM; `ghostshift-engine eval dataset/` corre offline y emite: matriz 3×3 global (esperado × obtenido), matriz por regla, error temporal de eventos (mediana y p90), recall/precisión de eventos `place`, y `params_hash`.
-4. **Regla anti-sobreajuste:** cualquier cambio de parámetros tras ver resultados se registra con motivo, cambia `params_hash` y obliga a re-evaluar los 12; el segundo procedimiento no puede motivar cambios de parámetros (es el conjunto de generalización). Se reportan honestamente los resultados de la primera evaluación y los de la final.
-5. Criterio de éxito (PRD §13): 4/4 PASS, ≥ 5/6 FAIL con la regla causante correcta, 2/2 REVIEW, **0 FAIL en clips correctos o insuficientes** (requisito propio más estricto: un FAIL falso es peor que un REVIEW), error temporal p90 ≤ 500 ms en eventos usados como evidencia.
+1. **Before running anything**, `dataset/manifest.yaml` is written: per clip, procedure, type (correct / error type X / insufficient), expected overall verdict, expected per-rule verdict and hand-annotated placement instants (±200 ms). It is versioned in git (a commit before the first evaluation).
+2. Recommended distribution of the 6 errors (3 per procedure): reversed order with the same final state (≥ 1 per procedure, PRD §13), object in the wrong zone, missing object, two objects swapped between zones, object removed at the end. Insufficient (2): hands over the zone at the end; a recording that starts after the placements.
+3. `TrackSet`s are cached after the single SAM call; `ghostshift-engine eval dataset/` runs offline and emits: a 3×3 global matrix (expected × obtained), a per-rule matrix, temporal error of events (median and p90), recall/precision of `place` events, and `params_hash`.
+4. **Anti-overfitting rule:** any parameter change after seeing results is recorded with a reason, changes `params_hash` and forces re-evaluating all 12; the second procedure cannot motivate parameter changes (it is the generalization set). The results of the first evaluation and of the final one are both reported honestly.
+5. Success criterion (PRD §13): 4/4 PASS, ≥ 5/6 FAIL with the correct causing rule, 2/2 REVIEW, **0 FAIL on correct or insufficient clips** (an additional, stricter requirement: a false FAIL is worse than a REVIEW), temporal error p90 ≤ 500 ms on events used as evidence.
 
 ---
 
-## 8. Estructura del motor
+## 8. Engine structure
 
-[DECISIÓN] **Python 3.11 puro**, `pydantic` v2 para contratos (validación + exportación de JSON Schema para el frontend), `numpy` para máscaras, `opencv-python-headless` solo en `calibration.py`. Sin SciPy, sin red. Justificación: el backend y los SDK de modelos serán con mayor probabilidad Python; numpy cubre RLE y rasterizado; el tamaño del problema (≤ 4 objetos, ≤ 600 fotogramas) no requiere más rendimiento (objetivo: `verify_run` < 1 s por clip de 60 s).
+[DECISION] **Plain Python 3.11**, `pydantic` v2 for contracts (validation + JSON Schema export for the frontend), `numpy` for masks, `opencv-python-headless` only in `calibration.py`. No SciPy, no network. Justification: the backend and the model SDKs will most likely be Python; numpy covers RLE and rasterization; the problem size (≤ 4 objects, ≤ 600 frames) does not require more performance (target: `verify_run` < 1 s per 60 s clip).
 
 ```
 engine/
   pyproject.toml
   ghostshift_engine/
-    __init__.py          # API pública: compile_procedure, propose_from_reference, verify_run
+    __init__.py          # public API: compile_procedure, propose_from_reference, verify_run
     version.py
     contracts/
       tracks.py          # TrackSet, Tracklet, FrameObs, AbsenceProbe
-      procedure.py       # esquema v2, migración v1→v2, validación
+      procedure.py       # schema v2, v1→v2 migration, validation
       params.py          # EngineParams (frozen) + defaults + hash
       results.py         # Event, Evidence, RuleResult, RunReport, reason codes
-    geometry.py          # RLE, rasterizado de polígonos, inside, transformaciones
-    calibration.py       # T_ref→exec, deriva intra-clip (OpenCV)
-    features.py          # rasgos y obs_state por fotograma
-    identity.py          # agrupación de tracklets, costes, asignación, ambigüedad
-    events.py            # máquina de estados place/remove, lagunas, ocurrencias
-    rules.py             # registro tipo → evaluador (añadir tipo = añadir función)
-    verdict.py           # compuertas, Kleene, agregación, regla de oro de FAIL
-    explain.py           # plantillas es-ES por reason_code
+    geometry.py          # RLE, polygon rasterization, inside, transformations
+    calibration.py       # T_ref→exec, intra-clip drift (OpenCV)
+    features.py          # per-frame features and obs_state
+    identity.py          # tracklet grouping, costs, assignment, ambiguity
+    events.py            # place/remove state machine, gaps, occurrences
+    rules.py             # type registry → evaluator (adding a type = adding a function)
+    verdict.py           # gates, Kleene, aggregation, golden rule of FAIL
+    explain.py           # es-ES templates per reason_code
     audit.py             # JSONL, provenance, replay
-    synth.py             # generador de escenarios (también para la demo de tests)
+    synth.py             # scenario generator (also used by tests)
     cli.py               # verify | replay | eval
   tests/{unit,property,fixtures}/
 ```
 
-`propose_from_reference(trackset_ref)` reutiliza `features` + `events` sobre el clip de referencia para producir zonas (§2.4) y la cadena de `place` observada; el orquestador la cruza con la propuesta de Muse Spark y marca como **hipótesis** cualquier orden propuesto por el LLM que contradiga los eventos observados (EP-02).
+`propose_from_reference(trackset_ref)` reuses `features` + `events` over the reference clip to produce zones (§2.4) and the observed `place` chain; the orchestrator cross-checks it with the Muse Spark proposal and marks as a **hypothesis** any order proposed by the LLM that contradicts the observed events (EP-02).
 
 ---
 
-## 9. Riesgos residuales y criterios de no-go (29–30 oct)
+## 9. Residual risks and no-go criteria
 
-### 9.1 Riesgos residuales
+### 9.1 Residual risks
 
-| Riesgo | Por qué persiste | Mitigación en este diseño |
+| Risk | Why it persists | Mitigation in this design |
 |---|---|---|
-| SAM no ofrece tracking temporal ni prompts de texto en el API | No verificado (S1, S2) | Adaptador con asociación IoU y prompts por caja; el motor no cambia |
-| Fecha de evento sesgada por la mano | La estabilidad se mide tras retirar la mano | Se fecha con intervalo `[t_lo, t_hi]`; el orden usa separación de intervalos |
-| Colocaciones por deslizamiento corto (< `move_min`) | Indistinguibles de un reajuste | Guía de grabación; `move_min` medido el día 29 |
-| Objetos apilados u ocluidos entre sí | Fuera de alcance P2, pero aparecerá | `frag_ratio` ⇒ OCCLUDED ⇒ REVIEW, no FAIL |
-| Exceso de REVIEW (producto «tímido») | Decisiones conservadoras (§3.6, §4.5) | Medir tasa de REVIEW en clips correctos; objetivo 0/4 |
-| Zonas derivadas demasiado estrictas | Una sola referencia | Margen 30 %; `BORDERLINE_POSITION` ⇒ REVIEW en vez de FAIL |
-| Firmas de color sensibles a iluminación | HSV sin normalizar | Histograma con V grueso (4 bins); confirmación humana como red |
+| SAM does not offer temporal tracking or text prompts in the API | Not verified (S1, S2) | Adapter with IoU association and box prompts; the engine does not change |
+| Event date biased by the hand | Stability is measured after the hand withdraws | Dated with an interval `[t_lo, t_hi]`; order uses interval separation |
+| Short sliding placements (< `move_min`) | Indistinguishable from a readjustment | Recording guide; `move_min` measured with real clips |
+| Objects stacked or occluded by each other | Out of scope (P2), but will appear | `frag_ratio` ⇒ OCCLUDED ⇒ REVIEW, not FAIL |
+| Too much REVIEW («timid» product) | Conservative decisions (§3.6, §4.5) | Measure the REVIEW rate on correct clips; target 0/4 |
+| Derived zones too strict | A single reference | 30 % margin; `BORDERLINE_POSITION` ⇒ REVIEW instead of FAIL |
+| Color signatures sensitive to lighting | Unnormalized HSV | Histogram with coarse V (4 bins); human confirmation as a safety net |
 
-### 9.2 Criterios medibles de go / no-go
+### 9.2 Measurable go / no-go criteria
 
-Medidos sobre ≥ 3 pares reales (referencia + ejecución) grabados el 29 oct, con instantes anotados a mano:
+Measured over ≥ 3 real pairs (reference + run) with hand-annotated instants:
 
-| Fecha | Métrica | Go | No-go / acción |
+| Stage | Metric | Go | No-go / action |
 |---|---|---|---|
-| 29 oct | API SAM devuelve máscaras por fotograma con identidad intra-clip (o asociable por IoU) a ≥ 5 fps efectivos | Sí | **No-go del motor de secuencias** si no hay salida temporal utilizable ⇒ replantear (PRD §13) |
-| 29 oct | Cobertura VISIBLE de objetos en tramos sin mano | ≥ 85 % | < 70 % ⇒ cambiar encuadre/iluminación antes de seguir |
-| 29 oct | Recall de colocaciones (evento con `t_hi` a ≤ 500 ms del anotado) | ≥ 90 % | < 75 % ⇒ **conditional go** del PRD: solo presencia/posición, sin vender orden |
-| 29 oct | Colocaciones falsas por clip | ≤ 0,5 de media | > 1 ⇒ igual que la fila anterior |
-| 30 oct | Identidad automática correcta (`AUTO_CONFIRMED` y correcta) | ≥ 90 % de objetos | < 70 % ⇒ confirmación humana obligatoria en cada ejecución (aceptable para demo, declarado) |
-| 30 oct | Identidad `AUTO_CONFIRMED` **incorrecta** | 0 | > 0 ⇒ subir margen δ a 0,25 y re-medir; si persiste, confirmación siempre |
-| 30 oct | Suite sintética: tests §7.3 + propiedades P1–P11 | 100 % verde | Cualquier fallo en P1/P2/P3 bloquea la integración con UI |
-| 30 oct | Veredicto correcto en los 3 pares reales sin cambiar parámetros entre clips | 3/3 (REVIEW aceptado en el insuficiente) | Un FAIL falso en un clip correcto ⇒ no avanzar al 31 oct sin diagnosticar |
-| 30 oct | Latencia SAM por clip de 30 s | ≤ 3 min | > 5 min ⇒ bajar a 5 fps y clips ≤ 20 s (parámetro global, re-medir P6) |
+| Observation | SAM API returns per-frame masks with intra-clip identity (or associable by IoU) at ≥ 5 effective fps | Yes | **No-go of the sequence engine** if there is no usable temporal output ⇒ rethink (PRD §13) |
+| Observation | VISIBLE coverage of objects in hand-free stretches | ≥ 85 % | < 70 % ⇒ change framing/lighting before continuing |
+| Observation | Placement recall (event with `t_hi` within 500 ms of the annotated one) | ≥ 90 % | < 75 % ⇒ PRD **conditional go**: presence/position only, do not sell order |
+| Observation | False placements per clip | ≤ 0.5 on average | > 1 ⇒ same as the previous row |
+| Identity | Correct automatic identity (`AUTO_CONFIRMED` and correct) | ≥ 90 % of objects | < 70 % ⇒ human confirmation mandatory on every run (acceptable for early use, declared) |
+| Identity | `AUTO_CONFIRMED` **incorrect** identity | 0 | > 0 ⇒ raise margin δ to 0.25 and re-measure; if it persists, always confirm |
+| Engine | Synthetic suite: §7.3 tests + properties P1–P11 | 100 % green | Any failure in P1/P2/P3 blocks integration with the UI |
+| Engine | Correct verdict on the 3 real pairs without changing parameters between clips | 3/3 (REVIEW accepted on the insufficient one) | A false FAIL on a correct clip ⇒ do not advance without diagnosing |
+| Performance | SAM latency per 30 s clip | ≤ 3 min | > 5 min ⇒ drop to 5 fps and clips ≤ 20 s (global parameter, re-measure P6) |
 
-Si el 30 oct el recall de colocaciones no alcanza el umbral, el producto se presenta como verificador de **estados** (presencia y posición) y la regla `before` se oculta en Rule Studio, sin describir GhostShift como verificador de secuencias (PRD §13, §14).
+If placement recall does not reach the threshold, the product is presented as a **state** verifier (presence and position) and the `before` rule is hidden in Rule Studio, without describing GhostShift as a sequence verifier (PRD §13, §14).

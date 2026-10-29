@@ -1,174 +1,169 @@
 # GhostShift — Product Requirements Document (PRD)
 
-**Versión:** 1.0 — 28 de octubre de 2026  
-**Estado:** Propuesta para validación; capacidades no demostradas todavía  
-**Contexto:** Meta Global AI Developer Hackathon 2026  
-**Track previsto:** Indie Developer  
-**Problem statement:** Push the Frontier (preferente; encaje también posible con Build for Your World)  
-**Premio complementario potencial:** Best Agentic Use-Case, sujeto a elegibilidad y reglas oficiales  
-**Fecha límite de envío:** 4 de noviembre de 2026, 9:00 p. m. hora de Lima
+**Version:** 1.0 — October 28, 2026  
+**Status:** Proposal for validation; capabilities not yet demonstrated
 
-## 1. Resumen ejecutivo
+## 1. Executive summary
 
-**GhostShift convierte una demostración en video en un verificador visual reutilizable de procedimientos físicos.** Una persona graba cómo se realiza una tarea estructurada; el sistema identifica objetos y eventos observables, propone reglas (presencia, colocación y orden), solicita una confirmación breve y luego analiza una nueva ejecución. El resultado es **PASS**, **FAIL** o **REVIEW**, acompañado de evidencias visuales y explicaciones.
+**GhostShift turns a video demonstration into a reusable visual verifier for physical procedures.** A person records how a structured task is done; the system identifies observable objects and events, proposes rules (presence, placement and order), asks for a short confirmation, and then analyzes a new run. The result is **PASS**, **FAIL** or **REVIEW**, together with visual evidence and explanations.
 
-**Promesa del MVP:** «Enséñale una tarea una vez. Comprueba la siguiente ejecución».
+**Product promise:** «Teach a task once. Verify the next run.»
 
-**Hipótesis que debemos validar:** es posible obtener reglas verificables de un procedimiento físico *nuevo*, sin entrenar modelos especializados ni programar una lógica exclusiva para ese procedimiento. Una demostración por sí sola no establece qué es normativamente obligatorio; por eso el usuario debe aprobar las reglas propuestas.
+**Hypothesis to validate:** it is possible to obtain verifiable rules for a *new* physical procedure without training specialized models and without writing logic specific to that procedure. A demonstration alone does not establish what is normatively required, which is why the user must approve the proposed rules.
 
-GhostShift **no** pretende certificar procesos industriales, evaluar seguridad humana ni comprender cualquier tarea. Su alcance inicial es un entorno de mesa, cámara fija, pocos objetos claramente diferenciables y transiciones visuales observables.
+GhostShift does **not** aim to certify industrial processes, assess human safety, or understand arbitrary tasks. Its initial scope is a tabletop setting, a fixed camera, a few clearly distinguishable objects and observable visual transitions.
 
-## 2. Problema y oportunidad
+## 2. Problem and opportunity
 
-En tareas manuales cortas y repetitivas (p. ej., preparar kits o montar componentes sencillos), convertir una demostración en comprobaciones digitales puede requerir configuración, etiquetado o ingeniería especializada. Esto dificulta probar controles de calidad visuales en procesos pequeños o cambiantes.
+For short, repetitive manual tasks (e.g., preparing kits or assembling simple components), turning a demonstration into digital checks can require configuration, labeling or specialized engineering. This makes it hard to introduce visual quality controls in small or changing processes.
 
-**Problema concreto:** un responsable conoce el orden correcto, pero carece de una forma rápida de convertirlo en verificaciones observables y explicar exactamente dónde una nueva ejecución se apartó de lo esperado.
+**Specific problem:** a supervisor knows the correct order but lacks a quick way to turn it into observable checks and to explain exactly where a new run deviated from what was expected.
 
-**Alternativas existentes:** plataformas de inspección visual industrial, checklists, procedimientos escritos y herramientas que generan instrucciones a partir de videos. GhostShift no afirmará inventar la inspección visual; su diferenciación aspiracional es **la configuración rápida desde un ejemplo, con reglas transparentes y evidencias auditables**.
+**Existing alternatives:** industrial visual inspection platforms, checklists, written procedures and tools that generate instructions from videos. GhostShift does not claim to have invented visual inspection; its aspirational differentiation is **fast configuration from a single example, with transparent rules and auditable evidence**.
 
-## 3. Usuarios y casos de uso
+## 3. Users and use cases
 
-**Usuario primario:** persona responsable de preparar o revisar un proceso repetitivo de ensamblaje ligero, empaquetado o preparación de kits en un entorno controlado.
+**Primary user:** the person responsible for preparing or reviewing a repetitive light-assembly, packaging or kit-preparation process in a controlled setting.
 
-**Usuario secundario:** operador o evaluador que ejecuta el procedimiento y necesita saber qué condición se incumplió.
+**Secondary user:** the operator or reviewer who performs the procedure and needs to know which condition was not met.
 
-**Caso principal:** montar un kit de tres componentes A, B y C sobre una superficie, ubicarlos en sus zonas y respetar un orden definido.
+**Main case:** assembling a kit of three components A, B and C on a surface, placing them in their zones and following a defined order.
 
-**Casos similares admitidos para comprobar generalización:** otro kit con objetos distintos y una secuencia diferente; una tarea de clasificación simple con 2–4 elementos visibles.
+**Similar supported cases, used to check generalization:** another kit with different objects and a different sequence; a simple sorting task with 2–4 visible items.
 
-## 4. Objetivos, métricas y límites
+## 4. Goals, metrics and limits
 
-### 4.1 Objetivos de producto
+### 4.1 Product goals
 
-1. Convertir un video de referencia en **reglas comprensibles y editables**, no solo en un resumen narrativo.
-2. Reutilizar esas reglas sobre una ejecución independiente sin cambiar el código.
-3. Informar el resultado con evidencia visual, eventos observados y causa concreta.
-4. Reconocer incertidumbre y solicitar revisión cuando los objetos no sean observables de forma suficiente.
-5. Hacer visible el uso sustancial de Muse Spark y SAM 3.1 en una demo auténtica de tres minutos.
+1. Turn a reference video into **understandable, editable rules**, not just a narrative summary.
+2. Reuse those rules on an independent run without changing code.
+3. Report the result with visual evidence, observed events and a concrete cause.
+4. Acknowledge uncertainty and request review when objects are not sufficiently observable.
+5. Make the use of Muse Spark and SAM 3.1 transparent through an audit log of every model call.
 
-### 4.2 Métricas de aceptación del prototipo (objetivos, no resultados)
+### 4.2 Prototype acceptance metrics (targets, not results)
 
-- **Generalización mínima:** dos procedimientos diferentes creados desde videos de referencia distintos; el segundo no requiere cambios de código ni reglas específicas precargadas.
-- **Exactitud sobre conjunto de demostración controlado:** cuatro de cuatro ejecuciones correctas aceptadas; al menos cinco de seis ejecuciones deliberadamente incorrectas rechazadas; dos clips visualmente ambiguos enviados a **REVIEW**.
-- **Trazabilidad:** cada FAIL identifica regla, objeto, instante/fotograma y evidencia asociada; nunca se muestra un error sin una condición observable.
-- **Configurable por usuario:** los pasos esenciales se confirman desde la interfaz sin etiquetado manual fotograma por fotograma.
-- **Operación real:** la demo emplea las llamadas auténticas a modelos y el mismo verificador que el producto; no se precalculan los resultados presentados como inferencia en vivo.
-- **Usabilidad objetivo:** desde subir un video válido hasta confirmar reglas, un usuario primerizo puede completar el recorrido guiado sin editar archivos ni código.
+- **Minimum generalization:** two different procedures created from different reference videos; the second requires no code changes and no preloaded procedure-specific rules.
+- **Accuracy on a controlled evaluation set:** four of four correct runs accepted; at least five of six deliberately incorrect runs rejected; two visually ambiguous clips sent to **REVIEW**.
+- **Traceability:** every FAIL identifies the rule, object, instant/frame and associated evidence; an error is never shown without an observable condition.
+- **User-configurable:** the essential steps are confirmed from the interface without frame-by-frame manual labeling.
+- **Real operation:** evaluation uses the genuine model calls and the same verifier as the product; results presented as inference are not precomputed.
+- **Target usability:** from uploading a valid video to confirming rules, a first-time user can complete the guided flow without editing files or code.
 
-Estas cifras son criterios de *go/no-go* para hackathon, **no** métricas suficientes para un despliegue industrial.
+These figures are *go/no-go* criteria for the prototype stage, **not** sufficient metrics for an industrial deployment.
 
-## 5. Alcance de la versión MVP
+## 5. MVP scope
 
-### Incluido (P0: imprescindible)
+### Included (P0: essential)
 
-- Subida de un **video de referencia** y de un **video de ejecución**.
-- Formatos MP4/WebM compatibles y validación de archivo, duración y orientación antes de procesar.
-- Entorno con cámara fija y visión completa de una mesa o superficie delimitada.
-- **2–4 objetos visualmente diferenciables**, con nombres o descripciones cortas confirmables.
-- Análisis con Muse Spark para proponer objetos, pasos y orden lógico observables.
-- Segmentación/seguimiento con SAM 3.1 para obtener evidencia espacial y temporal.
-- Reglas de **presencia de objeto**, **entrada/posición en zona** y **precedencia A antes de B**.
-- Pantalla de revisión donde el usuario acepta, desactiva o modifica reglas propuestas (incluyendo el orden), con validaciones simples.
-- Compilación de reglas aprobadas a una representación estructurada y ejecutable.
-- Verificación de otra ejecución y resultados **PASS / FAIL / REVIEW** por regla y globales.
-- Línea de tiempo con fotogramas de evidencia, máscaras o cuadros resaltados y explicación comprensible.
-- Registro de llamadas, versiones de modelo, reglas aprobadas y resultados para auditar la demo.
-- Ejemplo de un segundo procedimiento distinto para demostrar que no existe una secuencia codificada manualmente.
+- Upload of a **reference video** and a **run video**.
+- Supported MP4/WebM formats, with file, duration and orientation validation before processing.
+- A fixed-camera setup with a full view of a table or delimited surface.
+- **2–4 visually distinguishable objects**, with short names or descriptions the user can confirm.
+- Analysis with Muse Spark to propose observable objects, steps and logical order.
+- Segmentation/tracking with SAM 3.1 to obtain spatial and temporal evidence.
+- Rules for **object presence**, **entry/position in a zone** and **precedence A before B**.
+- A review screen where the user accepts, disables or edits proposed rules (including order), with simple validation.
+- Compilation of approved rules into a structured, executable representation.
+- Verification of another run and **PASS / FAIL / REVIEW** results per rule and overall.
+- Timeline with evidence frames, highlighted masks or boxes and an understandable explanation.
+- Log of calls, model versions, approved rules and results so every verdict can be audited.
+- A second, different procedure to show that no sequence is hand-coded.
 
-### Deseable (P1: solo si P0 funciona)
+### Desirable (P1: only if P0 works)
 
-- Captura desde cámara del navegador, además de subir clips.
-- Comparador lado a lado entre video de referencia y ejecución.
-- Exportar reporte JSON o PDF con reglas y evidencias.
-- Editor visual de zonas de interés para corregir una zona propuesta automáticamente.
-- Métricas simples de tiempo por paso.
+- Capture from the browser camera, in addition to uploading clips.
+- Side-by-side comparison of the reference video and the run.
+- Export a JSON or PDF report with rules and evidence.
+- A visual editor for zones of interest to correct an automatically proposed zone.
+- Simple per-step timing metrics.
 
-### Fuera de alcance (P2 / futuro)
+### Out of scope (P2 / future)
 
-- Video en directo con alertas de baja latencia.
-- Múltiples cámaras, cámaras móviles o reconstrucción 3D.
-- Seguimiento de manos preciso, estimación de fuerzas o comprobación de acciones invisibles.
-- Integración con PLC, robots, sistemas MES/ERP o cámaras industriales.
-- Certificación de seguridad, control de riesgos para personas, vigilancia de empleados o evaluación de productividad individual.
-- Entrenamiento/fine-tuning de modelos y reconocimiento universal de objetos arbitrariamente similares.
-- Detección de fallas en procedimientos largos, superpuestos o con muchos objetos oclusos.
+- Live video with low-latency alerts.
+- Multiple cameras, moving cameras or 3D reconstruction.
+- Precise hand tracking, force estimation or checking of invisible actions.
+- Integration with PLCs, robots, MES/ERP systems or industrial cameras.
+- Safety certification, risk control for people, employee monitoring or individual productivity assessment.
+- Model training/fine-tuning and universal recognition of arbitrarily similar objects.
+- Fault detection in long, overlapping procedures or ones with many occluded objects.
 
-## 6. Recorrido principal del usuario
+## 6. Main user journey
 
-**Paso 1 — Crear procedimiento.** La persona abre GhostShift, elige «Enseñar nuevo procedimiento», ve requisitos del video y sube una grabación de referencia.
+**Step 1 — Create a procedure.** The person opens GhostShift, chooses «Teach a new procedure», reads the video requirements and uploads a reference recording.
 
-**Paso 2 — Analizar.** GhostShift identifica los elementos relevantes y propone una línea de tiempo: qué objeto entra en qué zona y en qué orden. El usuario ve el estado del análisis y las partes que no pudieron interpretarse.
+**Step 2 — Analyze.** GhostShift identifies the relevant elements and proposes a timeline: which object enters which zone and in what order. The user sees the analysis status and the parts that could not be interpreted.
 
-**Paso 3 — Aprobar reglas.** La persona revisa una lista comprensible (p. ej., «El componente azul debe estar en la zona A al finalizar» y «A debe colocarse antes que B»), corrige lo necesario y hace clic en «Guardar procedimiento». Ninguna inferencia ambigua se convierte silenciosamente en obligación.
+**Step 3 — Approve rules.** The person reviews an understandable list (e.g., «The blue component must be in zone A at the end» and «A must be placed before B»), corrects what is needed and clicks «Save procedure». No ambiguous inference silently becomes an obligation.
 
-**Paso 4 — Verificar.** La persona sube una nueva ejecución del mismo procedimiento. GhostShift reutiliza las reglas guardadas, vuelve a observar objetos y eventos y calcula el resultado.
+**Step 4 — Verify.** The person uploads a new run of the same procedure. GhostShift reuses the saved rules, observes objects and events again and computes the result.
 
-**Paso 5 — Comprender el veredicto.** Se muestra un estado global y una lista de reglas; las incumplidas contienen evidencia temporal y visual. Si la observación es insuficiente, se indica REVIEW, no FAIL automático.
+**Step 5 — Understand the verdict.** An overall status and a list of rules are shown; those not met include temporal and visual evidence. If the observation is insufficient, REVIEW is shown, not an automatic FAIL.
 
-**Paso 6 — Probar transferencia.** El usuario enseña un procedimiento diferente con nuevos objetos y orden; GhostShift genera reglas nuevas utilizando la misma arquitectura.
+**Step 6 — Test transfer.** The user teaches a different procedure with new objects and order; GhostShift generates new rules using the same architecture.
 
-## 7. Requisitos funcionales y criterios de aceptación
+## 7. Functional requirements and acceptance criteria
 
-### EP-01 — Crear un procedimiento
+### EP-01 — Create a procedure
 
-**US-01.** Como responsable, quiero subir una demostración para iniciar una especificación visual sin escribir código.
+**US-01.** As a supervisor, I want to upload a demonstration so that I can start a visual specification without writing code.
 
-**Aceptación:** se puede cargar un MP4/WebM compatible; aparecen vista previa, duración y estado de procesamiento; archivos ilegibles muestran error accionable; el usuario no puede iniciar verificación antes de guardar reglas.
+**Acceptance:** a compatible MP4/WebM can be uploaded; preview, duration and processing status appear; unreadable files show an actionable error; the user cannot start verification before saving rules.
 
-### EP-02 — Proponer reglas visuales
+### EP-02 — Propose visual rules
 
-**US-02.** Como responsable, quiero que la IA identifique objetos, eventos y dependencias para reducir la configuración manual.
+**US-02.** As a supervisor, I want the AI to identify objects, events and dependencies so that manual configuration is reduced.
 
-**Aceptación:** el sistema propone una lista estructurada de objetos/zonas/eventos/reglas; cada regla tiene texto comprensible; si una acción no es visible o no puede inferirse, se marca como hipótesis o incertidumbre; las propuestas no se confunden con hechos confirmados.
+**Acceptance:** the system proposes a structured list of objects/zones/events/rules; each rule has understandable text; if an action is not visible or cannot be inferred, it is marked as a hypothesis or uncertainty; proposals are not confused with confirmed facts.
 
-### EP-03 — Confirmar y editar
+### EP-03 — Confirm and edit
 
-**US-03.** Como responsable, quiero aprobar o corregir las reglas para decidir qué se considera correcto.
+**US-03.** As a supervisor, I want to approve or correct the rules so that I decide what counts as correct.
 
-**Aceptación:** puedo activar/desactivar una regla, cambiar el orden previsto y confirmar identificadores de objetos; los cambios se guardan en un procedimiento versionado; ninguna verificación utiliza versiones de borrador no aprobadas.
+**Acceptance:** I can enable/disable a rule, change the expected order and confirm object identifiers; changes are saved in a versioned procedure; no verification uses unapproved draft versions.
 
-### EP-04 — Inspeccionar una nueva ejecución
+### EP-04 — Inspect a new run
 
-**US-04.** Como evaluador, quiero subir otro video y ver el cumplimiento de reglas específicas.
+**US-04.** As a reviewer, I want to upload another video and see compliance with specific rules.
 
-**Aceptación:** el sistema utiliza las reglas aprobadas; calcula eventos observables del nuevo clip; distingue entre «objeto presente» y «orden correcto», de modo que dos ejecuciones con el mismo estado final puedan producir resultados diferentes.
+**Acceptance:** the system uses the approved rules; computes observable events from the new clip; distinguishes «object present» from «correct order», so that two runs with the same final state can produce different results.
 
-### EP-05 — Evidencia y veredictos
+### EP-05 — Evidence and verdicts
 
-**US-05.** Como evaluador, quiero entender por qué el sistema aprobó, rechazó o no pudo decidir.
+**US-05.** As a reviewer, I want to understand why the system approved, rejected or could not decide.
 
-**Aceptación:** cada regla expone PASS, FAIL o REVIEW, junto con evidencia temporal; un FAIL contiene la regla incumplida y un evento que la contradice; REVIEW explica el dato faltante; el estado global es FAIL si existe algún fallo confirmado, REVIEW si no hay fallos pero al menos una regla es incierta y PASS solo si todas las reglas son verificadas.
+**Acceptance:** each rule shows PASS, FAIL or REVIEW, together with temporal evidence; a FAIL contains the rule not met and an event that contradicts it; REVIEW explains the missing data; the overall status is FAIL if any failure is confirmed, REVIEW if there are no failures but at least one rule is uncertain, and PASS only if all rules are verified.
 
-### EP-06 — Generalización demostrable
+### EP-06 — Demonstrable generalization
 
-**US-06.** Como juez o evaluador, quiero enseñar una tarea distinta para comprobar que el producto no está codificado para un solo ejemplo.
+**US-06.** As an evaluator, I want to teach a different task to check that the product is not coded for a single example.
 
-**Aceptación:** el segundo procedimiento puede darse de alta desde cero, con objetos y reglas propias; la verificación utiliza un motor genérico; no se despliegan nuevas versiones de código ni se modifican configuraciones ocultas para aceptarlo.
+**Acceptance:** the second procedure can be created from scratch, with its own objects and rules; verification uses a generic engine; no new code versions are deployed and no hidden settings are changed to accept it.
 
-### EP-07 — Robustez básica
+### EP-07 — Basic robustness
 
-**US-07.** Como usuario, quiero saber qué falló y cómo reintentarlo.
+**US-07.** As a user, I want to know what failed and how to retry.
 
-**Aceptación:** los errores de red/modelo tienen un mensaje visible y opción de reintento; los clips con cámara móvil, objetos fuera de plano o baja visibilidad se advierten; una segmentación vacía no provoca un PASS ni un FAIL artificial.
+**Acceptance:** network/model errors show a visible message and a retry option; clips with a moving camera, objects out of frame or low visibility trigger a warning; an empty segmentation does not produce an artificial PASS or FAIL.
 
-## 8. Reglas de evaluación del producto
+## 8. Product evaluation rules
 
-- **Presencia:** un objeto confirmado debe existir y poder identificarse en un estado temporal relevante.
-- **Posición:** un objeto debe ocupar una zona definida; la zona se representa en coordenadas relativas a la escena.
-- **Orden:** el evento de colocación A debe ocurrir antes del evento B; si el sistema solo ve los estados finales, no puede afirmar que verificó la secuencia.
-- **Persistencia mínima:** para evitar falsos eventos, una colocación puede requerir estabilidad durante un número configurable de fotogramas.
-- **Incertidumbre:** oclusión, identidad dudosa, ausencia temporal de detección o desplazamiento de cámara significativo llevan a REVIEW cuando impidan comprobar una condición.
-- **Identidad entre videos:** no se asume que los IDs de objetos devueltos por SAM se mantengan entre clips; se realiza correspondencia por descripción visual/semántica y verificación de zona, y se pide confirmación si es ambiguo.
+- **Presence:** a confirmed object must exist and be identifiable in a relevant temporal state.
+- **Position:** an object must occupy a defined zone; the zone is represented in scene-relative coordinates.
+- **Order:** placement event A must occur before event B; if the system only sees final states, it cannot claim to have verified the sequence.
+- **Minimum persistence:** to avoid false events, a placement may require stability for a configurable number of frames.
+- **Uncertainty:** occlusion, doubtful identity, temporary absence of detection or significant camera shift lead to REVIEW when they prevent a condition from being checked.
+- **Identity across videos:** the object IDs returned by SAM are not assumed to persist between clips; objects are matched by visual/semantic description and zone verification, and confirmation is requested if the match is ambiguous.
 
-**Contrato de reglas (ilustrativo):**
+**Rule contract (illustrative):**
 
 ```json
 {
   "procedure_id": "kit-001",
   "version": 1,
   "objects": [
-    {"id":"A","description":"componente azul"},
-    {"id":"B","description":"componente amarillo"}
+    {"id":"A","description":"blue component"},
+    {"id":"B","description":"yellow component"}
   ],
   "rules": [
     {"id":"R1","type":"present_in_zone","object":"A","zone":"left","at":"end"},
@@ -178,125 +173,125 @@ Estas cifras son criterios de *go/no-go* para hackathon, **no** métricas sufici
 }
 ```
 
-## 9. Estados y casos límite
+## 9. States and edge cases
 
-- **Sin archivo:** pantalla de inicio con instrucciones, ejemplo y restricciones de grabación.
-- **Video sin objetos detectables:** explicación + recomendación para repetir grabación; sin veredicto.
-- **Manos tapan un objeto:** REVIEW para reglas afectadas; no asumir automáticamente que el objeto falta.
-- **Mismos componentes, orden incorrecto:** FAIL de precedencia aunque el estado final sea válido.
-- **Orden correcto, objeto fuera de zona:** FAIL de posición, no de orden.
-- **Dos objetos casi idénticos:** solicitar identificación/corrección humana; no afirmar correspondencia segura.
-- **Solo se ve el final de la tarea:** las reglas de orden deben quedar en REVIEW.
-- **Cambio fuerte de cámara o encuadre:** mostrar incompatibilidad o solicitar recalibración.
-- **Edición posterior de reglas:** crear nueva versión y señalar que resultados anteriores corresponden a la versión usada.
-- **Caída de API o timeout:** ofrecer reintento y conservar los datos de la sesión si es posible.
+- **No file:** start screen with instructions, an example and recording constraints.
+- **Video without detectable objects:** explanation plus a recommendation to record again; no verdict.
+- **Hands cover an object:** REVIEW for the affected rules; do not automatically assume the object is missing.
+- **Same components, wrong order:** precedence FAIL even if the final state is valid.
+- **Correct order, object outside the zone:** position FAIL, not order.
+- **Two nearly identical objects:** request human identification/correction; do not claim a confident match.
+- **Only the end of the task is visible:** order rules must stay in REVIEW.
+- **Strong camera or framing change:** show incompatibility or request recalibration.
+- **Later rule edits:** create a new version and make clear that earlier results correspond to the version used.
+- **API outage or timeout:** offer a retry and keep the session data if possible.
 
-## 10. Experiencia e interfaz
+## 10. Experience and interface
 
-**Pantalla A: Inicio.** CTA «Enseñar procedimiento», ejemplo visual, requisitos de grabación.
+**Screen A: Start.** «Teach procedure» CTA, a visual example, recording requirements.
 
-**Pantalla B: Análisis.** Video original, progreso por etapas (interpretación, segmentación, propuesta de reglas), incidencias.
+**Screen B: Analysis.** Original video, progress by stage (interpretation, segmentation, rule proposal), issues.
 
-**Pantalla C: Rule Studio.** Lista editable de reglas, miniaturas o marcas temporales, botones de aprobación y guardado; señalar explícitamente que la IA propone y el usuario define la norma.
+**Screen C: Rule Studio.** Editable list of rules, thumbnails or timestamps, approve and save buttons; state explicitly that the AI proposes and the user defines the norm.
 
-**Pantalla D: Verificación.** Subida del segundo video y selección del procedimiento versionado.
+**Screen D: Verification.** Upload of the second video and selection of the versioned procedure.
 
-**Pantalla E: Resultado.** Encabezado PASS/FAIL/REVIEW, tabla de reglas, línea de tiempo y fotogramas resaltados; clic en evidencia lleva al instante del clip.
+**Screen E: Result.** PASS/FAIL/REVIEW header, rules table, timeline and highlighted frames; clicking evidence jumps to the instant in the clip.
 
-**Principios UX:** explicación antes que puntuaciones opacas; una acción principal por pantalla; mostrar incertidumbre; etiquetas visibles, no solo colores; demo accesible en desktop moderno.
+**UX principles:** explanation before opaque scores; one primary action per screen; show uncertainty; visible labels, not just colors; accessible on a modern desktop.
 
-## 11. Integración de Meta AI (límites funcionales)
+## 11. Meta AI integration (functional limits)
 
-**Muse Spark (preferencia: `muse-spark-1.3`):** comprender el video de referencia, proponer objetos y pasos, producir reglas estructuradas candidatas y ayudar a resolver correspondencias semánticas. Sus propuestas requieren validación por observación y aprobación humana. Puede funcionar como coordinador de llamadas y acciones con herramientas, sin afirmar autonomía irrestricta.
+**Muse Spark (preferred: `muse-spark-1.3`):** understand the reference video, propose objects and steps, produce candidate structured rules and help resolve semantic correspondences. Its proposals require validation by observation and human approval. It can act as a coordinator of calls and tool actions, without claiming unrestricted autonomy.
 
-**SAM 3.1 (`sam-3.1`):** localizar, segmentar y seguir objetos dentro de un clip. Las máscaras y trayectorias alimentan el detector de eventos del verificador.
+**SAM 3.1 (`sam-3.1`):** locate, segment and track objects within a clip. Masks and trajectories feed the verifier's event detector.
 
-**Motor determinista propio:** convertir geometría y tiempo a eventos; ejecutar reglas de presencia/posición/orden; calcular PASS/FAIL/REVIEW con evidencias y registrar incertidumbre. No delegar el veredicto final exclusivamente a una respuesta libre del LLM.
+**In-house deterministic engine:** convert geometry and time into events; run presence/position/order rules; compute PASS/FAIL/REVIEW with evidence and record uncertainty. The final verdict is never delegated solely to a free-form LLM response.
 
-**Condición operativa:** comprobar antes de implementar los límites actuales del servicio para tamaño de video, duración, fps, costos, formatos y latencias. Mantener parámetros de modelo configurables y no prometer cifras no medidas.
+**Operating condition:** check the current service limits for video size, duration, fps, costs, formats and latency before implementing. Keep model parameters configurable and do not promise unmeasured figures.
 
-Referencias técnicas oficiales:
+Official technical references:
 - https://dev.meta.ai/docs/models
 - https://dev.meta.ai/docs/sam/overview
 - https://dev.meta.ai/docs/media-segmentation
 
-## 12. Restricciones no funcionales, seguridad y privacidad
+## 12. Non-functional requirements, security and privacy
 
-- **Seguridad de credenciales:** claves API solo en backend; nunca embebidas en frontend.
-- **Consentimiento:** no subir grabaciones con personas identificables o información privada sin permiso; informar que se enviarán a un proveedor de inferencia.
-- **Retención:** borrar archivos temporales tras sesión o permitir eliminación explícita; cualquier retención persistente debe ser consentida y documentada.
-- **Aislamiento:** cada procedimiento y sus videos pertenecen a una sesión; no exposición pública automática.
-- **Observabilidad:** conservar en logs técnicos los IDs de petición, estado, errores, versión de modelo y tiempos, evitando datos personales innecesarios.
-- **Limitación declarada:** prototipo experimental; no apto para controles críticos de seguridad, cumplimiento legal o decisiones laborales automatizadas.
-- **Compatibilidad objetivo:** navegador moderno en escritorio; móvil no es requisito P0.
+- **Credential security:** API keys only in the backend; never embedded in the frontend.
+- **Consent:** do not upload recordings with identifiable people or private information without permission; state that they will be sent to an inference provider.
+- **Retention:** delete temporary files after the session or allow explicit deletion; any persistent retention must be consented to and documented.
+- **Isolation:** each procedure and its videos belong to a session; no automatic public exposure.
+- **Observability:** keep request IDs, status, errors, model version and timings in technical logs, avoiding unnecessary personal data.
+- **Stated limitation:** experimental product; not suitable for safety-critical controls, legal compliance or automated employment decisions.
+- **Target compatibility:** modern desktop browser; mobile is not a P0 requirement.
 
-## 13. Plan de validación y decisión go/no-go
+## 13. Validation plan and go/no-go decision
 
-**Dataset controlado mínimo:**
+**Minimum controlled dataset:**
 
-- Dos procedimientos independientes, cada uno con su referencia y reglas aprobadas.
-- Doce videos de ejecución en total: cuatro correctos, seis con errores reales distintos y dos con evidencia deliberadamente insuficiente.
-- Cambios de ritmo y gestos entre ejemplos correctos; al menos un par con idéntico estado final pero diferente orden.
+- Two independent procedures, each with its reference and approved rules.
+- Twelve run videos in total: four correct, six with distinct real errors and two with deliberately insufficient evidence.
+- Changes of pace and gestures among the correct examples; at least one pair with an identical final state but a different order.
 
-**Go:** se demuestra generalización a dos procesos sin ajustes ocultos, 4/4 PASS correctos, 5/6 FAIL detectados, 2/2 REVIEW ambiguos y evidencias razonablemente precisas.
+**Go:** generalization to two processes is demonstrated without hidden adjustments, 4/4 correct PASS, 5/6 FAIL detected, 2/2 ambiguous REVIEW and reasonably precise evidence.
 
-**Conditional go:** si presencia y posición funcionan pero orden no, mantener un MVP honesto limitado a estados y reducir la ambición de la propuesta; evitar describirlo como verificador de secuencias.
+**Conditional go:** if presence and position work but order does not, keep an honest MVP limited to states and reduce the ambition of the proposal; avoid describing it as a sequence verifier.
 
-**No-go:** si los veredictos requieren valores fijos para cada video, si se inventan eventos no observados o si no puede funcionar sobre una tarea nueva. En ese caso, replantear el producto antes de dedicar tiempo a acabados visuales.
+**No-go:** if verdicts require fixed values for each video, if unobserved events are invented, or if it cannot work on a new task. In that case, rethink the product before spending time on visual polish.
 
-## 14. Cronograma orientativo hasta la entrega
+## 14. Validation milestones
 
-| Fecha | Resultado requerido |
+| Milestone | Required result |
 |---|---|
-| 28 oct | Validar acceso a Muse Spark/SAM y procesar un clip de referencia |
-| 29 oct | Obtener objetos, máscaras y eventos; decidir go/no-go inicial |
-| 30 oct | Generación y aprobación de reglas + contrato JSON |
-| 31 oct | Verificador de presencia, posición y orden + evidencias |
-| 1 nov | Segunda tarea nueva y pruebas de generalización |
-| 2 nov | Interfaz completa y gestión de estados/errores |
-| 3 nov | Pruebas de 12 ejecuciones, correcciones, repositorio y video |
-| 4 nov | Congelar versión, verificar envío y presentar antes de las 9:00 p. m. de Lima |
+| 1. API viability | Access to Muse Spark/SAM validated and a reference clip processed |
+| 2. Observation | Objects, masks and events obtained; initial go/no-go decision |
+| 3. Rules | Rule generation and approval + JSON contract |
+| 4. Verifier | Presence, position and order verifier + evidence |
+| 5. Generalization | A second new task and generalization tests |
+| 6. Interface | Complete interface and state/error handling |
+| 7. Evaluation | 12-run evaluation, fixes and documentation |
 
-El plan requiere priorizar las pruebas de viabilidad. Si la interpretación de eventos temporales falla el 29–30 de octubre, no continuar como si la secuencia estuviera solucionada.
+Feasibility tests take priority. If the interpretation of temporal events fails at milestones 2–3, do not continue as if sequence verification were solved.
 
-## 15. Demostración final (máximo 3 minutos)
+## 15. Reference acceptance scenario
 
-1. **0:00–0:20 — Problema:** mostrar tarea manual y ausencia de control verificable rápido.
-2. **0:20–0:55 — Enseñar:** cargar una demostración nueva; mostrar análisis real con Muse Spark y SAM.
-3. **0:55–1:20 — Convertir:** aprobar reglas que el sistema propone, no una secuencia hardcodeada.
-4. **1:20–1:55 — Verificar:** cargar ejecución con orden incorrecto, aunque termine con piezas correctamente ubicadas.
-5. **1:55–2:20 — Evidencia:** enseñar FAIL con instante exacto y regla incumplida.
-6. **2:20–2:45 — Transferencia:** procedimiento con nuevos objetos y distinta secuencia; mostrar reglas creadas sin editar código.
-7. **2:45–3:00 — Cierre:** explicar utilidad, límites y el diferenciador del «video a verificador».
+A run-through that exercises the full product end to end; it is also a manual acceptance test.
 
-**Honestidad de la demo:** grabar la experiencia real, acortar esperas en edición de forma transparente si se explica, pero no representar respuestas grabadas como inferencia en vivo ni ocultar cambios de código por procedimiento.
+1. **Problem:** show a manual task with no quick, verifiable control.
+2. **Teach:** upload a new demonstration; show the real analysis with Muse Spark and SAM.
+3. **Convert:** approve the rules the system proposes, not a hard-coded sequence.
+4. **Verify:** upload a run with the wrong order, even if it ends with the pieces correctly placed.
+5. **Evidence:** show the FAIL with the exact instant and the rule not met.
+6. **Transfer:** a procedure with new objects and a different sequence; show the rules created without editing code.
+7. **Wrap-up:** explain the usefulness, the limits and the «video to verifier» differentiator.
 
-## 16. Entregables y definición de terminado
+**Honesty of the walkthrough:** record the real experience; shorten waits transparently if stated, but never present recorded responses as live inference or hide per-procedure code changes.
 
-- [ ] Aplicación funcional con flujo completo enseñanza → confirmación → verificación → evidencia.
-- [ ] Al menos dos procedimientos diferentes verificados con el mismo código.
-- [ ] Conjunto de pruebas y resultados medidos documentados; registrar fallos reales y límites.
-- [ ] Repositorio público con README, arquitectura, instrucciones de ejecución, variables de entorno y advertencias.
-- [ ] Evidencia explícita de uso de modelos Meta y contribuciones realizadas durante la hackathon.
-- [ ] Video de demo de tres minutos, enlace accesible y producto accesible para revisión.
-- [ ] Formulario de envío antes del plazo y miembros del equipo correctamente identificados.
+## 16. Release checklist and definition of done
 
-**Criterio de «terminado»:** una persona puede enseñar un proceso compatible, aceptar reglas, analizar otra ejecución y rastrear la evidencia del veredicto sin que un desarrollador modifique la lógica para ese proceso.
+- [ ] Working application with the full teaching → confirmation → verification → evidence flow.
+- [ ] At least two different procedures verified with the same code.
+- [ ] Test suite and measured results documented; record real failures and limits.
+- [ ] Repository with README, architecture, run instructions, environment variables and warnings.
+- [ ] Explicit evidence of Meta model usage (call audit log).
+- [ ] Walkthrough recording and an accessible deployment for review.
 
-## 17. Riesgos y decisiones abiertas
+**«Done» criterion:** a person can teach a compatible process, accept rules, analyze another run and trace the evidence behind the verdict without a developer modifying the logic for that process.
 
-| Riesgo | Severidad | Mitigación |
+## 17. Risks and open decisions
+
+| Risk | Severity | Mitigation |
 |---|---|---|
-| No inferir de forma fiable eventos temporales | Crítica | Pruebas día 1–2; restringir acciones a entradas estables en zonas |
-| Una sola ejecución no define obligatoriedad | Alta | Aprobación explícita de reglas y su versionado |
-| Confusión de objetos entre clips | Alta | Objetos diferenciables, descripciones confirmadas, REVIEW ante incertidumbre |
-| Oclusión o mala cámara | Alta | Guía de grabación y estado REVIEW |
-| Competencia con soluciones industriales | Alta | Demostrar configuración desde procedimiento desconocido y sin entrenamiento específico |
-| APIs, latencia y costo | Media-alta | Preflight de formatos/límites y presupuestos; carga de video optimizada |
-| Resultados atractivos pero hardcodeados | Crítica | Segundo procedimiento elegido al final, logs y repositorio auditable |
+| Temporal events cannot be inferred reliably | Critical | Early tests; restrict actions to stable entries into zones |
+| A single run does not define what is mandatory | High | Explicit rule approval and versioning |
+| Objects confused between clips | High | Distinguishable objects, confirmed descriptions, REVIEW under uncertainty |
+| Occlusion or poor camera | High | Recording guidance and REVIEW state |
+| Competition from industrial solutions | High | Demonstrate configuration from an unknown procedure without specific training |
+| APIs, latency and cost | Medium-high | Preflight of formats/limits and budgets; optimized video upload |
+| Attractive but hard-coded results | Critical | Second procedure chosen last, logs and an auditable repository |
 
-**Decisiones que quedan para la fase técnica:** encuadre mínimo recomendado, duración y fps exactos, método de definición de zonas, esquema final de eventos, umbrales geométricos y stack de frontend/backend. Se seleccionarán tras probar datos reales, no por suposición.
+**Decisions left for the technical phase:** recommended minimum framing, exact duration and fps, zone-definition method, final event schema, geometric thresholds and frontend/backend stack. They will be chosen after testing with real data, not by assumption.
 
 ---
 
-**Estado del PRD:** listo para iniciar validación técnica. No equivale a evidencia de que el modelo ya alcanza estos criterios.
+**PRD status:** ready to start technical validation. It is not evidence that the model already meets these criteria.

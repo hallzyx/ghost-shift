@@ -1,16 +1,16 @@
 # GhostShift
 
-**Enséñale una tarea una vez. Comprueba la siguiente ejecución.** Subes un video de referencia; Muse Spark y SAM 3.1 (API de Meta) proponen objetos, zonas y reglas; tú las apruebas; un motor determinista (sin IA) compara nuevas ejecuciones y devuelve PASS / FAIL / REVIEW con evidencia. Los modelos observan, el motor decide.
+**Teach a task once. Verify the next run.** Upload a reference video; Muse Spark and SAM 3.1 (Meta API) propose objects, zones and rules; you approve them; a deterministic engine (no AI) compares new runs and returns PASS / FAIL / REVIEW with evidence. The models observe, the engine decides.
 
-> Prototipo de investigación (Meta Global AI Developer Hackathon 2026). No apto para controles críticos ni de seguridad.
+> Not intended for safety-critical, compliance or other critical controls.
 
-## Requisitos
-Python 3.11+, Node 20+, `ffmpeg`/`ffprobe` en el PATH y una clave de la API de Meta.
+## Requirements
+Python 3.11+, Node 20+, `ffmpeg`/`ffprobe` on the PATH, and a Meta API key.
 
-## Arranque
+## Getting started
 ```bash
-# 1) Clave (solo backend; nunca se sube a git)
-cp .env.example .env          # edita .env y pon MODEL_API_KEY=<tu clave>   (también vale META_API_KEY)
+# 1) API key (backend only; never committed to git)
+cp .env.example .env          # edit .env and set MODEL_API_KEY=<your key>   (META_API_KEY also works)
 
 # 2) Backend  (http://localhost:8000)
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
@@ -20,15 +20,21 @@ uvicorn app.main:app --app-dir backend --port 8000
 # 3) Frontend (http://localhost:5173)
 cd frontend && npm install && npm run dev
 ```
-Abre http://localhost:5173. En «Enseñar» puedes usar los **videos de ejemplo sintéticos** incluidos (referencia + 4 ejecuciones: correcta, orden invertido, falta un objeto, mano tapando) o subir los tuyos (cámara fija, mesa a la vista, 2–4 objetos de colores distintos, MP4/MOV horizontal de 2–120 s).
+Open http://localhost:5173. In the Teach step (labelled «Enseñar» in the UI, which is currently in Spanish) you can use the bundled **synthetic sample videos** (a reference plus 4 runs: correct, reversed order, missing object, hand covering) or upload your own: table in view with some surface texture, camera as still as possible (handheld is tolerated), 2–4 objects in distinct colors, MP4/MOV, landscape recommended (portrait is accepted but untested), 2–120 s.
 
-## Pruebas
+## Tests
 ```bash
-(cd engine && python -m pytest) && (cd backend && python -m pytest)   # sin red; usan respuestas grabadas
+(cd engine && python -m pytest) && (cd backend && python -m pytest)   # no network; they use recorded responses
 ```
 
-## Estructura
-`engine/` motor determinista (sin red) · `backend/` API FastAPI, clientes Muse/SAM, trabajos · `frontend/` SPA React · `docs/` PRD, spec, contrato de API y hallazgos reales de la API de Meta (`docs/meta-findings.md`).
+## Layout
+`engine/` deterministic engine (no network) · `backend/` FastAPI API, Muse/SAM clients, jobs · `frontend/` React SPA · `docs/` PRD, specs, API contract and measured findings about the Meta API (`docs/meta-findings.md`).
 
-## Límites conocidos
-Validado solo con videos sintéticos de bloques planos y llamadas reales a la API; falta video real (manos, luz, cámara móvil). La identidad entre clips se resuelve por la descripción del objeto (no hay correspondencia visual) y no se detecta cámara movida. Ver `docs/meta-findings.md`.
+## Known limitations
+Tested with synthetic videos and with **a single real video** (handheld phone, 3 stacked tape rolls; derived clips made with ffmpeg: trimmed, reversed, shakier, blurred, flipped). Details and numbers in `docs/meta-findings.md`.
+- **Camera**: motion is compensated using the table texture (OpenCV, homography). If fewer than 80 % of frames can be aligned, the result is REVIEW («camera too shaky»); if the run cannot be aligned with the reference, zone rules go to REVIEW. On a **plain** table there is no texture: motion cannot be measured and a warning is shown («not checked»).
+- **Stacking** (`stacked_on`): decided from 2D boxes at the end of the clip; with a single oblique camera, «behind» can look like «on top of». A tower needs one rule per piece.
+- **Hands**: SAM returns a very large hand + arm box; any object under it counts as occluded, so if the hand is still on the table at the end the result is REVIEW, not FAIL.
+- **Similar objects**: SAM may mark several pieces with the same concept («green tape roll» marked all three rolls). If they cannot be told apart, the result is REVIEW `IDENTITY_CONFLICT`.
+- **Temporal order** (`before`) is unreliable with real hands (placement times come out with seconds of margin); it is not proposed for towers.
+- Identity across clips is resolved by the object description (there is no visual correspondence). Model responses are stored in `data/model_cache` so the same video is never paid for twice.
